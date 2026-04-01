@@ -5,6 +5,15 @@
 
 bool enbLoaded = false;
 
+// OG F4SE uses F4SEPlugin_Query, NG uses F4SEPlugin_Version. Export both.
+extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface*, F4SE::PluginInfo* a_info)
+{
+	a_info->infoVersion = F4SE::PluginInfo::kVersion;
+	a_info->name = Plugin::NAME.data();
+	a_info->version = Plugin::VERSION[0];
+	return true;
+}
+
 extern "C" DLLEXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 	F4SE::PluginVersionData data{};
 
@@ -70,7 +79,7 @@ void OnInit(F4SE::MessagingInterface::Message* a_msg)
 	switch (a_msg->type) {
 	case F4SE::MessagingInterface::kGameDataReady:
 	{
-		REX::INFO("Data loaded");
+		REX::INFO("[INIT] Data loaded");
 		Upscaling::GetSingleton()->OnDataLoaded();
 #ifndef NDEBUG
 		AddDebugInformation();
@@ -84,21 +93,32 @@ void OnInit(F4SE::MessagingInterface::Message* a_msg)
 
 extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f4se)
 {
-	F4SE::Init(a_f4se);
+	F4SE::InitInfo initInfo{};
+	initInfo.logLevel = REX::LOG_LEVEL::DEBUG;
+	initInfo.trampoline = true;
+	initInfo.trampolineSize = 1 << 10;
+	F4SE::Init(a_f4se, initInfo);
+
+	REX::INFO("[INIT] AAAUpscaling loaded");
 
 #ifndef NDEBUG
 	while (!REX::W32::IsDebuggerPresent()) {};
 #endif
 
 	if (ENB_API::RequestENBAPI()) {
-		REX::INFO("ENB detected");
+		REX::INFO("[ENB] ENB detected - FSR will be DISABLED, 7 hooks SKIPPED");
 		enbLoaded = true;
 	} else {
-		REX::INFO("ENB not detected");
+		REX::INFO("[ENB] ENB not detected - full pipeline active");
 	}
 
+	REX::INFO("[INIT] Installing DX11 hooks...");
 	DX11Hooks::Install();
+	REX::INFO("[INIT] DX11 hooks installed");
+
+	REX::INFO("[INIT] Installing upscaling hooks...");
 	Upscaling::InstallHooks();
+	REX::INFO("[INIT] Upscaling hooks installed");
 
 	const auto messaging = F4SE::GetMessagingInterface();
 	messaging->RegisterListener(OnInit);

@@ -1,4 +1,4 @@
-set(PLUGIN_NAME "AAAUpscaling")
+set(PLUGIN_NAME "Upscaling")
 
 add_library(${PLUGIN_NAME} SHARED)
 

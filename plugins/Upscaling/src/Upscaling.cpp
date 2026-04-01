@@ -291,33 +291,40 @@ struct DrawWorld_Imagespace
 
 void Upscaling::InstallHooks()
 {
+	REX::INFO("[HOOK] Installing ImageSpaceEffectTemporalAA_IsActive vfunc hook");
 	// Disable TAA shader if using alternative scaling method
 	stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(RE::VTABLE::ImageSpaceEffectTemporalAA[0]);
 
 	auto runtimeIdx = static_cast<std::uint8_t>(REL::Module::GetRuntimeIndex());
+	REX::INFO("[HOOK] Runtime index: {}", runtimeIdx);
 
 	// Control jitters, dynamic resolution, sampler states, and render targets
+	REX::INFO("[HOOK] Installing BSGraphics_State_UpdateDynamicResolution hook");
 	{
 		constexpr std::ptrdiff_t offsets[] = { 0x14B, 0x29F, 0x29F };
 		stl::write_thunk_call<BSGraphics_State_UpdateDynamicResolution>(REL::ID({ 984743, 2318321, 2318321 }).address() + offsets[runtimeIdx]);
 	}
 
+	REX::INFO("[HOOK] Installing DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport hook");
 	// Add alternative scaling method
 	{
 		constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
 		stl::write_thunk_call<DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
 	}
 
+	REX::INFO("[HOOK] Installing DrawWorld_Render_PreUI_DeferredPrePass hook");
 	// Control sampler states for mipmap bias
 	{
 		constexpr std::ptrdiff_t offsets[] = { 0x17F, 0x2E3, 0x2E3 };
 		stl::write_thunk_call<DrawWorld_Render_PreUI_DeferredPrePass>(REL::ID({ 984743, 2318321, 2318321 }).address() + offsets[runtimeIdx]);
 	}
+	REX::INFO("[HOOK] Installing DrawWorld_Render_PreUI_Forward hook");
 	{
 		constexpr std::ptrdiff_t offsets[] = { 0x1C9, 0x3A6, 0x3A6 };
 		stl::write_thunk_call<DrawWorld_Render_PreUI_Forward>(REL::ID({ 984743, 2318321, 2318321 }).address() + offsets[runtimeIdx]);
 	}
 
+	REX::INFO("[HOOK] Installing ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth hook");
 	// Copy opaque texture for FSR reactive mask
 	{
 		constexpr std::ptrdiff_t offsets[] = { 0x1DC, 0x4C6, 0x4C6 };
@@ -326,39 +333,52 @@ void Upscaling::InstallHooks()
 
 	// These hooks are not needed when using ENB because dynamic resolution is not supported
 	if (!enbLoaded) {
+		REX::INFO("[HOOK] ENB not loaded, installing 7 dynamic resolution hooks");
+
+		REX::INFO("[HOOK] Installing DrawWorld_DeferredComposite_RenderPassImmediately hook");
 		// Fix dynamic resolution for BSDFComposite
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0x8DC, 0x915, 0x915 };
 			stl::write_thunk_call<DrawWorld_DeferredComposite_RenderPassImmediately>(REL::ID({ 728427, 2318313, 2318313 }).address() + offsets[runtimeIdx]);
 		}
 
+		REX::INFO("[HOOK] Installing BSImagespaceShaderLensFlare_RenderLensFlare detour");
 		// Fix dynamic resolution for Lens Flare visibility
 		stl::detour_thunk<BSImagespaceShaderLensFlare_RenderLensFlare>(REL::ID({ 676108, 2317547, 2317547 }));
 
+		REX::INFO("[HOOK] Installing BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique hook");
 		// Fix dynamic resolution for Screenspace Reflections
 		stl::write_thunk_call<BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique>(REL::ID({ 779077, 2317302, 2317302 }).address() + 0x1C);
 
+		REX::INFO("[HOOK] Installing DrawWorld_Imagespace_RenderEffectRange hook");
 		// Fix dynamic resolution for post processing
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0x9F, 0x83, 0x83 };
 			stl::write_thunk_call<DrawWorld_Imagespace_RenderEffectRange>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
 		}
 
+		REX::INFO("[HOOK] Installing ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant hook");
 		// Fix VATs line thickness
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0xBB, 0x110, 0x110 };
 			stl::write_thunk_call<ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant>(REL::ID({ 1042583, 2317983, 2317983 }).address() + offsets[runtimeIdx]);
 		}
 
+		REX::INFO("[HOOK] Installing LoadingMenu_Render_UpdateTemporalData hook");
 		// Fix jitter in LoadingMenu
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0x2BD, 0x275, 0x275 };
 			stl::write_thunk_call<LoadingMenu_Render_UpdateTemporalData>(REL::ID({ 135719, 2249225, 2249225 }).address() + offsets[runtimeIdx]);
 		}
 
+		REX::INFO("[HOOK] Installing DrawWorld_Imagespace detour");
 		// Fix dynamic resolution after upscaling
 		stl::detour_thunk<DrawWorld_Imagespace>(REL::ID({ 587723, 2318322, 2318322 }));
+	} else {
+		REX::INFO("[HOOK] ENB loaded, skipping 7 dynamic resolution hooks (BSDFComposite, LensFlare, SSR, PostProcessing, VATs, LoadingMenu, DrawWorld_Imagespace)");
 	}
+
+	REX::INFO("[HOOK] All upscaling hooks installed");
 }
 
 struct SamplerStates
@@ -380,13 +400,18 @@ void Upscaling::LoadSettings()
 
 	settings.upscaleMethodPreference = static_cast<uint>(ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2));
 	settings.qualityMode = static_cast<uint>(ini.GetLongValue("Settings", "iQualityMode", 1));
+
+	REX::INFO("[SETTINGS] Loaded: upscaleMethodPreference={} (0=Disabled, 1=FSR, 2=DLSS), qualityMode={} (0=NativeAA, 1=Quality, 2=Balanced, 3=Perf, 4=UltraPerf)",
+		settings.upscaleMethodPreference, settings.qualityMode);
 }
 
 void Upscaling::OnDataLoaded()
 {
+	REX::INFO("[INIT] OnDataLoaded: registering UI event sink, loading settings, updating game settings");
 	RE::UI::GetSingleton()->RegisterSink<RE::MenuOpenCloseEvent>(this);
 	LoadSettings();
 	UpdateGameSettings();
+	REX::INFO("[INIT] OnDataLoaded complete");
 }
 
 RE::BSEventNotifyControl Upscaling::ProcessEvent(const RE::MenuOpenCloseEvent& a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
@@ -559,10 +584,14 @@ void Upscaling::UpdateRenderTargets(float a_currentWidthRatio, float a_currentHe
 	if (previousWidthRatio == a_currentWidthRatio && previousHeightRatio == a_currentHeightRatio)
 		return;
 
+	REX::INFO("[RT] Render targets resolution changed: ratio {:.4f}x{:.4f} -> {:.4f}x{:.4f}",
+		previousWidthRatio, previousHeightRatio, a_currentWidthRatio, a_currentHeightRatio);
+
 	previousWidthRatio = a_currentWidthRatio;
 	previousHeightRatio = a_currentHeightRatio;
 
 	// Recreate render targets with new dimensions
+	REX::INFO("[RT] Recreating {} render targets with new ratio", ARRAYSIZE(renderTargetsPatch));
 	for (int i = 0; i < ARRAYSIZE(renderTargetsPatch); i++)
 		UpdateRenderTarget(renderTargetsPatch[i], a_currentWidthRatio, a_currentHeightRatio);
 
@@ -622,6 +651,13 @@ void Upscaling::UpdateRenderTargets(float a_currentWidthRatio, float a_currentHe
 
 void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 {
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[RT] First OverrideRenderTargets call: {} targets to patch, {} indices to copy",
+			ARRAYSIZE(renderTargetsPatch), a_indicesToCopy.size());
+		loggedOnce = true;
+	}
+
 	// Replace all patched render targets with their scaled proxy versions
 	for (int i = 0; i < ARRAYSIZE(renderTargetsPatch); i++) {
 		int targetIndex = renderTargetsPatch[i];
@@ -677,6 +713,13 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 
 void Upscaling::ResetRenderTargets(const std::vector<int>& a_indicesToCopy)
 {
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[RT] First ResetRenderTargets call: {} targets to restore, {} indices to copy",
+			ARRAYSIZE(renderTargetsPatch), a_indicesToCopy.size());
+		loggedOnce = true;
+	}
+
 	// Restore all original full-resolution render targets
 	for (int i = 0; i < ARRAYSIZE(renderTargetsPatch); i++) {
 		int targetIndex = renderTargetsPatch[i];
@@ -776,6 +819,7 @@ void Upscaling::UpdateSamplerStates(float a_currentMipBias)
 	if (previousMipBias == a_currentMipBias)
 		return;
 
+	REX::INFO("[SAMPLER] Mip bias changed: {:.4f} -> {:.4f}", previousMipBias, a_currentMipBias);
 	previousMipBias = a_currentMipBias;
 
 	// Create new sampler states with negative LOD bias
@@ -837,6 +881,14 @@ void Upscaling::CopyDepth()
 	// Calculate both display (screen) and render (scaled) resolutions
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio, screenSize.y * renderTargetManager->dynamicHeightRatio);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[DEPTH] First CopyDepth: screen={}x{}, render={}x{}, widthRatio={:.4f}, heightRatio={:.4f}",
+			(uint)screenSize.x, (uint)screenSize.y, (uint)renderSize.x, (uint)renderSize.y,
+			renderTargetManager->dynamicWidthRatio, renderTargetManager->dynamicHeightRatio);
+		loggedOnce = true;
+	}
 
 	// Get the scaled depth buffer as input
 	auto depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain].srViewDepth);
@@ -918,12 +970,31 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	UpscaleMethod currentUpscaleMethod = (UpscaleMethod)settings.upscaleMethodPreference;
 
 	// If DLSS is not available, default to FSR
-	if (!streamline->featureDLSS && currentUpscaleMethod == UpscaleMethod::kDLSS)
+	if (!streamline->featureDLSS && currentUpscaleMethod == UpscaleMethod::kDLSS) {
+		static bool loggedDLSSFallback = false;
+		if (!loggedDLSSFallback) {
+			REX::INFO("[UPSCALE] DLSS preferred but not available, falling back to FSR");
+			loggedDLSSFallback = true;
+		}
 		currentUpscaleMethod = UpscaleMethod::kFSR;
+	}
 
 	// ENB is loaded, disable FSR
-	if (enbLoaded && currentUpscaleMethod == UpscaleMethod::kFSR)
+	if (enbLoaded && currentUpscaleMethod == UpscaleMethod::kFSR) {
+		static bool loggedENBDisable = false;
+		if (!loggedENBDisable) {
+			REX::INFO("[ENB] ENB loaded, forcing FSR disable -> kDisabled");
+			loggedENBDisable = true;
+		}
 		currentUpscaleMethod = UpscaleMethod::kDisabled;
+	}
+
+	static bool loggedOnce = false;
+	if (!loggedOnce && !a_checkMenu) {
+		REX::INFO("[UPSCALE] GetUpscaleMethod resolved: method={} (0=Disabled, 1=FSR, 2=DLSS), preference={}, enbLoaded={}, dlssAvailable={}",
+			static_cast<uint>(currentUpscaleMethod), settings.upscaleMethodPreference, enbLoaded, streamline->featureDLSS);
+		loggedOnce = true;
+	}
 
 	return currentUpscaleMethod;
 }
@@ -937,6 +1008,8 @@ void Upscaling::CheckResources()
 
 	// Detect when upscaling method changes and manage resources accordingly
 	if (previousUpscaleMethodNoMenu != upscaleMethodNoMenu) {
+		REX::INFO("[UPSCALE] Method transition: {} -> {} (0=Disabled, 1=FSR, 2=DLSS)",
+			static_cast<uint>(previousUpscaleMethodNoMenu), static_cast<uint>(upscaleMethodNoMenu));
 		// Clean up resources from the previous upscaling method
 		if (previousUpscaleMethodNoMenu == UpscaleMethod::kDisabled)
 			CreateUpscalingResources();  // Transitioning from disabled to enabled
@@ -1051,6 +1124,15 @@ void Upscaling::UpdateUpscaling()
 	// Example: Quality mode returns upscale ratio of ~1.5x, so resolutionScale = 1/1.5 = 0.67
 	float resolutionScale = enbLoaded || upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)settings.qualityMode);
 
+	{
+		static float previousResolutionScale = -1.0f;
+		if (previousResolutionScale != resolutionScale) {
+			REX::INFO("[RES] Resolution scale changed: {:.4f} -> {:.4f} (qualityMode={}, enbLoaded={}, method={})",
+				previousResolutionScale, resolutionScale, settings.qualityMode, enbLoaded, static_cast<uint>(upscaleMethodNoMenu));
+			previousResolutionScale = resolutionScale;
+		}
+	}
+
 	// Calculate mipmap LOD bias
 	// Example: 0.67 scale -> log2(0.67) = -0.58
 	float currentMipBias = std::log2f(resolutionScale);
@@ -1075,6 +1157,13 @@ void Upscaling::UpdateUpscaling()
 		auto renderWidth = static_cast<uint>(static_cast<float>(screenWidth) * resolutionScale);
 		auto phaseCount = ffxFsr3GetJitterPhaseCount(renderWidth, screenWidth);
 		ffxFsr3GetJitterOffset(&jitter.x, &jitter.y, gameViewport->frameCount, phaseCount);
+
+		static bool loggedFirstJitter = false;
+		if (!loggedFirstJitter) {
+			REX::INFO("[UPSCALE] First jitter: screen={}x{}, renderWidth={}, phaseCount={}, jitter=({}, {})",
+				screenWidth, screenHeight, renderWidth, phaseCount, jitter.x, jitter.y);
+			loggedFirstJitter = true;
+		}
 
 		// Convert to NDC (X negated for DirectX)
 		gameViewport->offsetX = 2.0f * -jitter.x / static_cast<float>(screenWidth);
@@ -1118,6 +1207,15 @@ void Upscaling::Upscale()
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio, screenSize.y * renderTargetManager->dynamicHeightRatio);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[UPSCALE] First Upscale dispatch: method={} (1=FSR, 2=DLSS), screen={}x{}, render={}x{}, jitter=({}, {}), qualityMode={}",
+			static_cast<uint>(upscaleMethod),
+			(uint)screenSize.x, (uint)screenSize.y, (uint)renderSize.x, (uint)renderSize.y,
+			jitter.x, jitter.y, settings.qualityMode);
+		loggedOnce = true;
+	}
 
 	// DLSS: Dilate motion vectors for better temporal stability
 	if (upscaleMethod == UpscaleMethod::kDLSS){

@@ -74,6 +74,11 @@ void FidelityFX::CreateFSRResources()
 		fsrScratchBuffer = nullptr;
 		return;
 	}
+
+	REX::INFO("[FSR] FSR3 context created: maxRender={}x{}, maxUpscale={}x{}, display={}x{}",
+		contextDescription.maxRenderSize.width, contextDescription.maxRenderSize.height,
+		contextDescription.maxUpscaleSize.width, contextDescription.maxUpscaleSize.height,
+		contextDescription.displaySize.width, contextDescription.displaySize.height);
 }
 
 void FidelityFX::DestroyFSRResources()
@@ -196,6 +201,16 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 		dispatchParameters.preExposure = 1.0f;
 
 		dispatchParameters.flags = 0;
+
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::INFO("[FSR] First FSR3 dispatch: renderSize={}x{}, jitter=({}, {}), sharpness={}, deltaTime={:.3f}ms, cameraNear={}, cameraFar={}",
+				dispatchParameters.renderSize.width, dispatchParameters.renderSize.height,
+				dispatchParameters.jitterOffset.x, dispatchParameters.jitterOffset.y,
+				dispatchParameters.sharpness, dispatchParameters.frameTimeDelta,
+				dispatchParameters.cameraNear, dispatchParameters.cameraFar);
+			loggedOnce = true;
+		}
 
 		if (ffxFsr3ContextDispatchUpscale(&fsrContext, &dispatchParameters) != FFX_OK)
 			REX::CRITICAL("[FidelityFX] Failed to dispatch upscaling!");

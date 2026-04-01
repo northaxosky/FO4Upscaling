@@ -158,6 +158,15 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 		slSetTag(viewport, resourceTags, _countof(resourceTags), context);
 	}
 
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[SL] First DLSS dispatch: renderSize={}x{}, outputSize={}x{}, mode={}, jitter=({}, {})",
+			(uint)a_renderSize.x, (uint)a_renderSize.y,
+			gameViewport->screenWidth, gameViewport->screenHeight,
+			a_qualityMode, a_jitter.x, a_jitter.y);
+		loggedOnce = true;
+	}
+
 	sl::ViewportHandle view(viewport);
 	const sl::BaseStructure* inputs[] = { &view };
 	slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context);

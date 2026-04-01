@@ -9,19 +9,16 @@
 		{
 			"name": "common",
 			"hidden": true,
-			"cacheVariables": {
-				"F4SE_SUPPORT_XBYAK": "ON"
-			},
 			"binaryDir": "${sourceDir}/build"
 		},
-        {
-            "name": "vcpkg",
-            "hidden": true,
-            "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-                "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
-            }
-        },
+		{
+			"name": "vcpkg",
+			"hidden": true,
+			"cacheVariables": {
+				"CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+				"VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
+			}
+		},
 		{
 			"name": "win64",
 			"hidden": true,
@@ -46,40 +43,7 @@
 			}
 		},
 		{
-			"name": "PRE-NG",
-			"cacheVariables": {
-				"BUILD_PRE_NG": true,
-				"BUILD_POST_NG": false,
-				"BUILD_POST_AE": false
-			},
-			"inherits": [
-				"common",
-				"vcpkg",
-				"win64",
-				"msvc"
-			]
-		},
-		{
-			"name": "POST-NG",
-			"cacheVariables": {
-				"BUILD_PRE_NG": false,
-				"BUILD_POST_NG": true,
-				"BUILD_POST_AE": false
-			},
-			"inherits": [
-				"common",
-				"vcpkg",
-				"win64",
-				"msvc"
-			]
-		},
-				{
-			"name": "POST-AE",
-			"cacheVariables": {
-				"BUILD_PRE_NG": false,
-				"BUILD_POST_NG": false,
-				"BUILD_POST_AE": true
-			},
+			"name": "default",
 			"inherits": [
 				"common",
 				"vcpkg",

@@ -81,7 +81,7 @@ enum class DepthStencilTarget
 
 ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramType, const char* Program = "main")
 {
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
 	// Compiler setup
@@ -96,15 +96,15 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 		return (char)c;
 	});
 	if (!std::filesystem::exists(FilePath)) {
-		logger::error("Failed to compile shader; {} does not exist", str);
+		REX::ERROR("Failed to compile shader; {} does not exist", str);
 		return nullptr;
 	}
 	if (FAILED(D3DCompileFromFile(FilePath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, Program, ProgramType, flags, 0, &shaderBlob, &shaderErrors))) {
-		logger::warn("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
+		REX::WARN("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
 		return nullptr;
 	}
 	if (shaderErrors)
-		logger::debug("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
+		REX::DEBUG("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
 
 	ID3D11ComputeShader* regShader;
 	DX::ThrowIfFailed(device->CreateComputeShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &regShader));
@@ -113,7 +113,7 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 
 void Upscaling::LoadSettings()
 {
-	logger::info("[Frame Generation] Loading settings");
+	REX::INFO("[Frame Generation] Loading settings");
 
 	CSimpleIniA ini;
 	ini.SetUnicode();
@@ -122,8 +122,8 @@ void Upscaling::LoadSettings()
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
 
-	logger::info("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
-	logger::info("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
+	REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
+	REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
 }
 
 void Upscaling::PostPostLoad()
@@ -131,20 +131,20 @@ void Upscaling::PostPostLoad()
 	highFPSPhysicsFixLoaded = GetModuleHandleA("Data\\F4SE\\Plugins\\HighFPSPhysicsFix.dll") != nullptr;
 
 	if (highFPSPhysicsFixLoaded)
-		logger::info("[Frame Generation] HighFPSPhysicsFix.dll is loaded");
+		REX::INFO("[Frame Generation] HighFPSPhysicsFix.dll is loaded");
 	else
-		logger::info("[Frame Generation] HighFPSPhysicsFix.dll is not loaded");
+		REX::INFO("[Frame Generation] HighFPSPhysicsFix.dll is not loaded");
 
 	InstallHooks();
 }
 
 void Upscaling::CreateFrameGenerationResources()
 {
-	logger::info("[Frame Generation] Creating resources");
+	REX::INFO("[Frame Generation] Creating resources");
 	
 	setupBuffers = true;
 
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto& main = rendererData->renderTargets[(uint)RenderTarget::kMain];
 
 	for (int index = 0; index < 2; index++) {
@@ -268,7 +268,7 @@ void Upscaling::CreateFrameGenerationResources()
 
 void Upscaling::PreAlpha()
 {
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	
 	auto& colorMain = rendererData->renderTargets[(uint)RenderTarget::kMain];
@@ -285,7 +285,7 @@ void Upscaling::PostAlpha()
 	if (!setupBuffers)
 		CreateFrameGenerationResources();
 
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
@@ -339,7 +339,7 @@ void Upscaling::CopyBuffersToSharedResources()
 	if (!setupBuffers)
 		CreateFrameGenerationResources();
 
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
@@ -488,7 +488,7 @@ double Upscaling::GetRefreshRate(HWND a_window)
 			}
 		}
 	}
-	logger::error("Failed to retrieve refresh rate from swap chain");
+	REX::ERROR("Failed to retrieve refresh rate from swap chain");
 	return 60;
 }
 
@@ -500,7 +500,7 @@ void Upscaling::PostDisplay()
 	if (!setupBuffers)
 		CreateFrameGenerationResources();
 	
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 
 	auto& swapChain = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
 	ID3D11Resource* swapChainResource;
@@ -519,7 +519,7 @@ void Upscaling::Reset()
 	if (!setupBuffers)
 		CreateFrameGenerationResources();
 
-	auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
+	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
@@ -580,22 +580,22 @@ struct DrawWorld_Reticle
 
 void Upscaling::InstallHooks()
 {
-#if defined(FALLOUT_POST_NG)
-	stl::detour_thunk<WindowSizeChanged>(REL::ID(2276824));
-	stl::write_thunk_call<SetUseDynamicResolutionViewportAsDefaultViewport>(REL::ID(2318322).address() + 0xC5);
-	stl::detour_thunk<DrawWorld_Forward>(REL::ID(2318315));
-	stl::write_thunk_call<DrawWorld_Reticle>(REL::ID(2318315).address() + 0x53D);
-#else
+	auto runtimeIdx = static_cast<std::uint8_t>(REL::Module::GetRuntimeIndex());
+
 	// Fix game initialising twice
-	stl::detour_thunk<WindowSizeChanged>(REL::ID(212827));
+	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));
 
 	// Watch frame presentation
-	stl::write_thunk_call<SetUseDynamicResolutionViewportAsDefaultViewport>(REL::ID(587723).address() + 0xE1);
+	constexpr std::ptrdiff_t dynResOffsets[] = { 0xE1, 0xC5, 0xC5 };
+	stl::write_thunk_call<SetUseDynamicResolutionViewportAsDefaultViewport>(
+		REL::ID({ 587723, 2318322, 2318322 }).address() + dynResOffsets[runtimeIdx]);
 
 	// Fix reticles on motion vectors and depth
-	stl::detour_thunk<DrawWorld_Forward>(REL::ID(656535));
-	stl::write_thunk_call<DrawWorld_Reticle>(REL::ID(338205).address() + 0x253);
-#endif
+	stl::detour_thunk<DrawWorld_Forward>(REL::ID({ 656535, 2318315, 2318315 }));
 
-	logger::info("[Upscaling] Installed hooks");
+	constexpr std::ptrdiff_t reticleOffsets[] = { 0x253, 0x53D, 0x53D };
+	stl::write_thunk_call<DrawWorld_Reticle>(
+		REL::ID({ 338205, 2318315, 2318315 }).address() + reticleOffsets[runtimeIdx]);
+
+	REX::INFO("[Upscaling] Installed hooks");
 }

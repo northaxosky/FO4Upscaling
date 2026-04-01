@@ -29,28 +29,19 @@ void FidelityFX::SetupFrameGeneration()
 	createBackend.device = dx12SwapChain->d3d12Device.get();
 
 	if (ffx::CreateContext(frameGenContext, nullptr, createFg, createBackend) != ffx::ReturnCode::Ok) {
-		logger::critical("[FidelityFX] Failed to create frame generation context!");
+		REX::CRITICAL("[FidelityFX] Failed to create frame generation context!");
 	}
 }
 
 [[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
 {
-#if defined(FALLOUT_POST_NG)
-	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID(2704621) };
-#else
-	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID(600795) };
-#endif
+	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
 	return singleton.get();
 }
 
-
 [[nodiscard]] static RE::BSGraphics::RenderTargetManager* RenderTargetManager_GetSingleton()
 {
-#if defined(FALLOUT_POST_NG)
-	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID(2666735) };
-#else
-	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID(1508457) };
-#endif
+	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
 	return singleton.get();
 }
 
@@ -102,7 +93,7 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 	configParameters.generationRect.height = dx12SwapChain->swapChainDesc.Height;
 
 	if (ffx::Configure(frameGenContext, configParameters) != ffx::ReturnCode::Ok) {
-		logger::critical("[FidelityFX] Failed to configure frame generation!");
+		REX::CRITICAL("[FidelityFX] Failed to configure frame generation!");
 	}
 
 	static LARGE_INTEGER frequency = []() {
@@ -149,13 +140,8 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 
 		dispatchParameters.frameTimeDelta = deltaTime * 1000.f;
 
-#if defined(FALLOUT_POST_NG)
-		dispatchParameters.cameraNear = *(float*)REL::ID(2712882).address();
-		dispatchParameters.cameraFar = *(float*)REL::ID(2712883).address();
-#else
-		dispatchParameters.cameraNear = *(float*)REL::ID(57985).address();
-		dispatchParameters.cameraFar = *(float*)REL::ID(958877).address();
-#endif
+		dispatchParameters.cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
+		dispatchParameters.cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
 		dispatchParameters.cameraFovAngleVertical = 1.0f;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
@@ -166,7 +152,7 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 		dispatchParameters.motionVectors = ffxApiGetResourceDX12(motionVectors);
 
 		if (ffx::Dispatch(frameGenContext, dispatchParameters) != ffx::ReturnCode::Ok) {
-			logger::critical("[FidelityFX] Failed to dispatch frame generation!");
+			REX::CRITICAL("[FidelityFX] Failed to dispatch frame generation!");
 		}
 	}
 

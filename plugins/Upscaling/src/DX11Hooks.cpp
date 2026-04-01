@@ -1,0 +1,69 @@
+#include "DX11Hooks.h"
+
+#include <d3d11.h>
+
+#include "Streamline.h"
+
+extern bool enbLoaded;
+
+struct hkD3D11CreateDeviceAndSwapChain
+{
+	static HRESULT WINAPI thunk(
+		IDXGIAdapter* pAdapter,
+		D3D_DRIVER_TYPE DriverType,
+		HMODULE Software,
+		UINT Flags,
+		const D3D_FEATURE_LEVEL* pFeatureLevels,
+		UINT FeatureLevels,
+		UINT SDKVersion,
+		const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+		IDXGISwapChain** ppSwapChain,
+		ID3D11Device** ppDevice,
+		D3D_FEATURE_LEVEL* pFeatureLevel,
+		ID3D11DeviceContext** ppImmediateContext)
+	{
+		const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
+		pFeatureLevels = &featureLevel;
+		FeatureLevels = 1;
+
+		DX::ThrowIfFailed(func(pAdapter,
+			DriverType,
+			Software,
+			Flags,
+			pFeatureLevels,
+			FeatureLevels,
+			SDKVersion,
+			pSwapChainDesc,
+			ppSwapChain,
+			ppDevice,
+			pFeatureLevel,
+			ppImmediateContext));
+
+		auto streamline = Streamline::GetSingleton();
+
+		if (streamline->interposer){
+			streamline->Initialize();
+			if (!enbLoaded)
+				streamline->slUpgradeInterface((void**)&(*ppSwapChain));
+			streamline->slSetD3DDevice(*ppDevice);
+			streamline->CheckFeatures(pAdapter);
+			streamline->PostDevice();
+		}
+
+		return S_OK;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+namespace DX11Hooks
+{
+	void Install()
+	{
+		auto streamline = Streamline::GetSingleton();
+		streamline->LoadInterposer();
+
+		uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
+		// Hook BSGraphics::CreateD3DAndSwapChain::D3D11CreateDeviceAndSwapChain to use D3D_FEATURE_LEVEL_11_1
+		(uintptr_t&)hkD3D11CreateDeviceAndSwapChain::func = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::thunk);
+	}
+}

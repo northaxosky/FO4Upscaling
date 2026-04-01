@@ -56,7 +56,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 	auto upscaling = Upscaling::GetSingleton();
 
 	if (pSwapChainDesc->Windowed) {
-		logger::info("[Frame Generation] Frame Generation enabled, using D3D12 proxy");
+		REX::INFO("[Frame Generation] Frame Generation enabled, using D3D12 proxy");
 		
 		auto fidelityFX = FidelityFX::GetSingleton();
 
@@ -111,7 +111,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			}
 
 		} else {
-			logger::warn("[Frame Generation] amd_fidelityfx_dx12.dll is not loaded, skipping proxy");
+			REX::WARN("[Frame Generation] amd_fidelityfx_dx12.dll is not loaded, skipping proxy");
 		}
 	}
 
@@ -135,10 +135,10 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 void DX11Hooks::Install()
 {
 	if (ENB_API::RequestENBAPI()) {
-		logger::info("ENB detected, using alternative swap chain hook");
+		REX::INFO("ENB detected, using alternative swap chain hook");
 		enbLoaded = true;
 	} else {
-		logger::info("ENB not detected, using standard swap chain hook");
+		REX::INFO("ENB not detected, using standard swap chain hook");
 	}
 
 	auto fidelityFX = FidelityFX::GetSingleton();

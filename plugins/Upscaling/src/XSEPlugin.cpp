@@ -1,6 +1,7 @@
 #include "DX11Hooks.h"
 #include "Upscaling.h"
 
+#include <SimpleIni.h>
 #include "ENB/ENBSeriesAPI.h"
 
 bool enbLoaded = false;
@@ -93,8 +94,14 @@ void OnInit(F4SE::MessagingInterface::Message* a_msg)
 
 extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f4se)
 {
+	// Read debug logging preference from INI before F4SE::Init sets up the logger
+	CSimpleIniA ini;
+	ini.SetUnicode();
+	ini.LoadFile("Data\\MCM\\Settings\\Upscaling.ini");
+	bool debugLogging = ini.GetBoolValue("Settings", "bEnableDebugLogging", false);
+
 	F4SE::InitInfo initInfo{};
-	initInfo.logLevel = REX::LOG_LEVEL::DEBUG;
+	initInfo.logLevel = debugLogging ? REX::LOG_LEVEL::DEBUG : REX::LOG_LEVEL::INFO;
 	initInfo.trampoline = true;
 	initInfo.trampolineSize = 1 << 10;
 	F4SE::Init(a_f4se, initInfo);

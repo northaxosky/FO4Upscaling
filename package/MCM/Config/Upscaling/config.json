@@ -62,6 +62,19 @@
 					"Ultra Performance"
 				]
 			}
+		},
+		{
+			"text": "DEBUG",
+			"type": "section"
+		},
+		{
+			"id": "bEnableDebugLogging:Settings",
+			"text": "Enable Debug Logging",
+			"type": "toggle",
+			"help": "Enables verbose diagnostic logging for troubleshooting. Logs go to F4SE/Upscaling.log. Requires game restart. (Default: Off)",
+			"valueOptions": {
+				"sourceType": "ModSettingBool"
+			}
 		}
 	]
 }

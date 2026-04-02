@@ -16,11 +16,10 @@ RESULTS_DIR="$PROJECT_ROOT/test-results/$(date +%Y%m%d_%H%M%S)"
 TIMEOUT_SECONDS=180
 STABILIZE_SECONDS=15
 
-# Kill any existing game/MO2 instances
-cleanup_processes() {
+# Kill game process only — do NOT kill MO2, RootBuilder needs it alive to unmount root mods
+kill_game() {
     taskkill.exe //F //IM Fallout4.exe 2>/dev/null || true
-    taskkill.exe //F //IM "$(basename "$MO2_EXE")" 2>/dev/null || true
-    sleep 2
+    sleep 5  # Give MO2/RootBuilder time to clean up
 }
 
 # --- Phase 1: Build & Deploy ---
@@ -29,7 +28,7 @@ echo "=== Phase 1: Build & Deploy ==="
 
 # --- Phase 2: Ensure clean state ---
 echo "=== Phase 2: Cleanup ==="
-cleanup_processes
+kill_game
 
 # --- Phase 3: Launch game via MO2 ---
 echo "=== Phase 3: Launching Fallout 4 ==="
@@ -156,6 +155,6 @@ cat "$RESULTS_DIR/result.txt"
 
 # --- Phase 6: Kill game ---
 echo "=== Phase 6: Cleanup ==="
-cleanup_processes
+kill_game
 
 echo "Results: $RESULTS_DIR"

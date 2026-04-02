@@ -61,7 +61,28 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 		
 		auto fidelityFX = FidelityFX::GetSingleton();
 
-		if (fidelityFX->module) {
+		bool hasBackend = fidelityFX->module;
+
+		// For DLSS-G, check if Streamline is ready and the hardware supports it
+		if (upscaling->settings.frameGenType == 1) {
+			auto streamline = StreamlineFG::GetSingleton();
+			if (streamline->initialized) {
+				streamline->CheckFeatures(pAdapter);
+				if (streamline->featureDLSSG) {
+					upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
+					hasBackend = true;
+					REX::INFO("[FG] DLSS-G hardware supported, using DLSS Frame Generation");
+				} else {
+					REX::WARN("[FG] DLSS-G not supported on this GPU, falling back to FSR3");
+					upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+				}
+			} else {
+				REX::WARN("[FG] Streamline not initialized, falling back to FSR3");
+				upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+			}
+		}
+
+		if (hasBackend) {
 			upscaling->d3d12Interop = true;
 			upscaling->refreshRate = Upscaling::GetRefreshRate(pSwapChainDesc->OutputWindow);
 
@@ -103,6 +124,14 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				proxy->SetD3D11DeviceContext(context);
 
 				proxy->CreateD3D12Device(adapter);
+
+				// Set D3D12 device for Streamline if using DLSS-G
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto streamline = StreamlineFG::GetSingleton();
+					streamline->SetD3DDevice(proxy->d3d12Device.get());
+					streamline->PostDevice();
+				}
+
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
 				proxy->CreateInterop();
 
@@ -112,7 +141,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			}
 
 		} else {
-			REX::WARN("[Frame Generation] amd_fidelityfx_dx12.dll is not loaded, skipping proxy");
+			REX::WARN("[Frame Generation] No frame generation backend available, skipping proxy");
 		}
 	}
 

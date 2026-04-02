@@ -2,3 +2,4 @@
 /dist
 /bin
 /test-results
+scripts/.env

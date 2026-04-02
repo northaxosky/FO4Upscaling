@@ -1,10 +1,19 @@
 #!/bin/bash
 set -e
 
-PROJECT_ROOT="C:/Users/Kuz/documents/projects/FO4Upscaling"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load user config
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    source "$SCRIPT_DIR/.env"
+else
+    echo "ERROR: scripts/.env not found. Copy scripts/.env.example to scripts/.env and configure paths."
+    exit 1
+fi
+
 BUILD_DIR="$PROJECT_ROOT/build"
 PACKAGE_DIR="$PROJECT_ROOT/package"
-MOD_DIR="C:/Games/Modding/The Midnight Ride/mods/Upscaling + FG Test"
 
 FG_BUILD="$BUILD_DIR/plugins/FrameGeneration/Release"
 US_BUILD="$BUILD_DIR/plugins/Upscaling/Release"
@@ -21,7 +30,7 @@ check_game_running() {
 
 build() {
     echo "=== Building ==="
-    export VCPKG_ROOT="C:/Utilities/vcpkg"
+    export VCPKG_ROOT
     cd "$PROJECT_ROOT"
     cmake --build build --config Release 2>&1
     echo "=== Build complete ==="

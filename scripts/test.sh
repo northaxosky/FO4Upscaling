@@ -1,9 +1,17 @@
 #!/bin/bash
 set -e
 
-PROJECT_ROOT="C:/Users/Kuz/documents/projects/FO4Upscaling"
-MO2_EXE="C:/Games/Modding/The Midnight Ride/MidnightRide.exe"
-F4SE_LOG_DIR="C:/Users/Kuz/Documents/My Games/Fallout4/F4SE"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load user config
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    source "$SCRIPT_DIR/.env"
+else
+    echo "ERROR: scripts/.env not found. Copy scripts/.env.example to scripts/.env and configure paths."
+    exit 1
+fi
+
 RESULTS_DIR="$PROJECT_ROOT/test-results/$(date +%Y%m%d_%H%M%S)"
 TIMEOUT_SECONDS=120
 STABILIZE_SECONDS=30
@@ -11,13 +19,13 @@ STABILIZE_SECONDS=30
 # Kill any existing game/MO2 instances
 cleanup_processes() {
     taskkill.exe //F //IM Fallout4.exe 2>/dev/null || true
-    taskkill.exe //F //IM MidnightRide.exe 2>/dev/null || true
+    taskkill.exe //F //IM "$(basename "$MO2_EXE")" 2>/dev/null || true
     sleep 2
 }
 
 # --- Phase 1: Build & Deploy ---
 echo "=== Phase 1: Build & Deploy ==="
-"$PROJECT_ROOT/scripts/deploy.sh" build
+"$SCRIPT_DIR/deploy.sh" build
 
 # --- Phase 2: Ensure clean state ---
 echo "=== Phase 2: Cleanup ==="
@@ -25,7 +33,7 @@ cleanup_processes
 
 # --- Phase 3: Launch game via MO2 ---
 echo "=== Phase 3: Launching Fallout 4 ==="
-"$MO2_EXE" -p "Test" "moshortcut://F4SE" &
+"$MO2_EXE" -p "$MO2_PROFILE" "moshortcut://F4SE" &
 
 echo "Waiting for Fallout4.exe..."
 WAIT_START=$SECONDS

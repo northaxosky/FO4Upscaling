@@ -6,6 +6,7 @@
 #include "Upscaling.h"
 #include "DX12SwapChain.h"
 #include "FidelityFX.h"
+#include "Streamline.h"
 
 #include "ENB/ENBSeriesAPI.h"
 
@@ -141,8 +142,23 @@ void DX11Hooks::Install()
 		REX::INFO("ENB not detected, using standard swap chain hook");
 	}
 
+	auto upscaling = Upscaling::GetSingleton();
 	auto fidelityFX = FidelityFX::GetSingleton();
+
+	// Always load FidelityFX as fallback
 	fidelityFX->LoadFFX();
+
+	// Load Streamline if DLSS-G is requested
+	if (upscaling->settings.frameGenType == 1) {
+		REX::INFO("[FG] DLSS-G requested, loading Streamline interposer");
+		auto streamline = StreamlineFG::GetSingleton();
+		streamline->LoadInterposer();
+		if (streamline->interposer) {
+			streamline->Initialize();
+		} else {
+			REX::WARN("[FG] Streamline interposer failed to load, will use FSR3 fallback");
+		}
+	}
 
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 

@@ -7,6 +7,8 @@
 class Upscaling
 {
 public:
+	enum class FrameGenType : int { kFSR3 = 0, kDLSSG = 1 };
+
 	static Upscaling* GetSingleton()
 	{
 		static Upscaling singleton;
@@ -17,12 +19,14 @@ public:
 	{
 		bool frameGenerationMode = 1;
 		bool frameLimitMode = 1;
+		int frameGenType = 0;  // 0=FSR3, 1=DLSS-G
 	};
 
 	Settings settings;
 
 	bool highFPSPhysicsFixLoaded = false;
 
+	FrameGenType activeFrameGenType = FrameGenType::kFSR3;
 	bool d3d12Interop = false;
 	double refreshRate = 0.0f;
 

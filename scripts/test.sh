@@ -49,6 +49,27 @@ done
 ELAPSED=$(( SECONDS - WAIT_START ))
 echo "Fallout4.exe detected (${ELAPSED}s)"
 
+# --- Phase 3b: Wait for main menu, then send E twice to load save ---
+echo "Waiting for main menu (Data loaded marker)..."
+MENU_WAIT=$SECONDS
+UPSCALING_LOG="$F4SE_LOG_DIR/Upscaling.log"
+FG_LOG="$F4SE_LOG_DIR/AAAFrameGeneration.log"
+while (( SECONDS - MENU_WAIT < 120 )); do
+    if [ -f "$UPSCALING_LOG" ] && grep -q "Data loaded" "$UPSCALING_LOG" 2>/dev/null; then
+        echo "Main menu reached, sending E to load save..."
+        sleep 5
+        powershell.exe -Command "
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.SendKeys]::SendWait('e')
+            Start-Sleep -Seconds 2
+            [System.Windows.Forms.SendKeys]::SendWait('e')
+        " 2>/dev/null || true
+        echo "Save load triggered"
+        break
+    fi
+    sleep 3
+done
+
 # --- Phase 4: Monitor ---
 echo "=== Phase 4: Monitoring ==="
 UPSCALING_LOG="$F4SE_LOG_DIR/Upscaling.log"

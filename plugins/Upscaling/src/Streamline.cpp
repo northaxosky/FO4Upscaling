@@ -169,7 +169,13 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 
 	sl::ViewportHandle view(viewport);
 	const sl::BaseStructure* inputs[] = { &view };
-	slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context);
+	auto evalResult = slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context);
+
+	static bool evalLogged = false;
+	if (!evalLogged) {
+		REX::INFO("[SL] slEvaluateFeature result: {}", (int)evalResult);
+		evalLogged = true;
+	}
 }
 
 void Streamline::UpdateConstants(float2 a_jitter)

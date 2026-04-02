@@ -91,5 +91,32 @@ namespace Util
 		return singleton.get();
 	}
 
+	// OG runtime has 101 render targets (vs 100 in NG/AE) in RenderTargetManager,
+	// shifting all fields after the renderTargetData array by +0x30 (sizeof(RenderTarget)).
+	// These accessors use absolute offsets from the struct base to read/write the correct fields.
+	// OG offsets: dynamicWidthRatio=0xFB8, dynamicHeightRatio=0xFBC, isDynamic=0xFD8
+	// NG offsets: dynamicWidthRatio=0xF88, dynamicHeightRatio=0xF8C, isDynamic=0xFA8
+
+	[[nodiscard]] static float& DynamicWidthRatio(RE::BSGraphics::RenderTargetManager* rtm)
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0xFB8, 0xF88, 0xF88 };
+		auto offset = offsets[static_cast<uint8_t>(REL::Module::GetRuntimeIndex())];
+		return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + offset);
+	}
+
+	[[nodiscard]] static float& DynamicHeightRatio(RE::BSGraphics::RenderTargetManager* rtm)
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0xFBC, 0xF8C, 0xF8C };
+		auto offset = offsets[static_cast<uint8_t>(REL::Module::GetRuntimeIndex())];
+		return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + offset);
+	}
+
+	[[nodiscard]] static bool& IsDynamicResolutionCurrentlyActivated(RE::BSGraphics::RenderTargetManager* rtm)
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0xFD8, 0xFA8, 0xFA8 };
+		auto offset = offsets[static_cast<uint8_t>(REL::Module::GetRuntimeIndex())];
+		return *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(rtm) + offset);
+	}
+
 	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program = "main");
 }

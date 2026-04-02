@@ -38,6 +38,13 @@ Output:
 
 ## Scripts
 
+Before using scripts, copy `scripts/.env.example` to `scripts/.env` and configure paths for your setup:
+
+```bash
+cp scripts/.env.example scripts/.env
+# Edit scripts/.env with your MO2 mod folder, game paths, etc.
+```
+
 ### Deploy to MO2 mod folder
 
 ```bash
@@ -67,6 +74,7 @@ extern/
 cmake/
   Common.cmake           # Shared build config (configure_xse_plugin function)
 scripts/
+  .env.example           # Template for local path config
   deploy.sh              # Build + deploy to MO2 test mod
   test.sh                # Automated game test pipeline
 ```

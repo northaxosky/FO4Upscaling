@@ -91,31 +91,43 @@ namespace Util
 		return singleton.get();
 	}
 
-	// OG runtime has 101 render targets (vs 100 in NG/AE) in RenderTargetManager,
-	// shifting all fields after the renderTargetData array by +0x30 (sizeof(RenderTarget)).
-	// These accessors use absolute offsets from the struct base to read/write the correct fields.
-	// OG offsets: dynamicWidthRatio=0xFB8, dynamicHeightRatio=0xFBC, isDynamic=0xFD8
-	// NG offsets: dynamicWidthRatio=0xF88, dynamicHeightRatio=0xF8C, isDynamic=0xFA8
+	// CommonLibF4 has a 0x30 pad in RenderTargetManager that shifts dynamicWidthRatio
+	// to 0xFB8, but the OG game binary reads from 0xF88 (no pad). We must write to both
+	// the struct member (for our code) and the real game offset (for the game's code).
+	static constexpr std::ptrdiff_t GAME_DYNAMIC_WIDTH_RATIO_OFFSET = 0xF88;
+	static constexpr std::ptrdiff_t GAME_DYNAMIC_HEIGHT_RATIO_OFFSET = 0xF8C;
+	static constexpr std::ptrdiff_t GAME_IS_DYNAMIC_RES_ACTIVATED_OFFSET = 0xFA8;
 
-	[[nodiscard]] static float& DynamicWidthRatio(RE::BSGraphics::RenderTargetManager* rtm)
+	static void SetDynamicResolution(RE::BSGraphics::RenderTargetManager* rtm, float width, float height, bool activated)
 	{
-		constexpr std::ptrdiff_t offsets[] = { 0xFB8, 0xF88, 0xF88 };
-		auto offset = offsets[static_cast<uint8_t>(REL::Module::GetRuntimeIndex())];
-		return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + offset);
+		// Write to struct members (used by our code)
+		rtm->dynamicWidthRatio = width;
+		rtm->dynamicHeightRatio = height;
+		rtm->isDynamicResolutionCurrentlyActivated = activated;
+
+		// Also write to the game's actual offsets (no-pad layout)
+		if (REL::Module::IsRuntimeOG()) {
+			auto base = reinterpret_cast<uintptr_t>(rtm);
+			*reinterpret_cast<float*>(base + GAME_DYNAMIC_WIDTH_RATIO_OFFSET) = width;
+			*reinterpret_cast<float*>(base + GAME_DYNAMIC_HEIGHT_RATIO_OFFSET) = height;
+			*reinterpret_cast<bool*>(base + GAME_IS_DYNAMIC_RES_ACTIVATED_OFFSET) = activated;
+		}
 	}
 
-	[[nodiscard]] static float& DynamicHeightRatio(RE::BSGraphics::RenderTargetManager* rtm)
+	static float GetGameDynamicWidthRatio(RE::BSGraphics::RenderTargetManager* rtm)
 	{
-		constexpr std::ptrdiff_t offsets[] = { 0xFBC, 0xF8C, 0xF8C };
-		auto offset = offsets[static_cast<uint8_t>(REL::Module::GetRuntimeIndex())];
-		return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + offset);
+		if (REL::Module::IsRuntimeOG()) {
+			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + GAME_DYNAMIC_WIDTH_RATIO_OFFSET);
+		}
+		return rtm->dynamicWidthRatio;
 	}
 
-	[[nodiscard]] static bool& IsDynamicResolutionCurrentlyActivated(RE::BSGraphics::RenderTargetManager* rtm)
+	static float GetGameDynamicHeightRatio(RE::BSGraphics::RenderTargetManager* rtm)
 	{
-		constexpr std::ptrdiff_t offsets[] = { 0xFD8, 0xFA8, 0xFA8 };
-		auto offset = offsets[static_cast<uint8_t>(REL::Module::GetRuntimeIndex())];
-		return *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(rtm) + offset);
+		if (REL::Module::IsRuntimeOG()) {
+			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + GAME_DYNAMIC_HEIGHT_RATIO_OFFSET);
+		}
+		return rtm->dynamicHeightRatio;
 	}
 
 	ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const std::vector<std::pair<const char*, const char*>>& Defines, const char* ProgramType, const char* Program = "main");

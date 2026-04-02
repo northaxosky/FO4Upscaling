@@ -53,7 +53,7 @@ struct DrawWorld_Imagespace_RenderEffectRange
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
 		static auto gameViewport = Util::State_GetSingleton();
 
-		bool requiresOverride = renderTargetManager->dynamicHeightRatio != 1.0 || renderTargetManager->dynamicWidthRatio != 1.0;
+		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
 		auto originalOffsetX = gameViewport->offsetX;
 		auto originalOffsetY = gameViewport->offsetY;
@@ -64,8 +64,8 @@ struct DrawWorld_Imagespace_RenderEffectRange
 			gameViewport->offsetY = originalOffsetY;
 		}
 
-		originalDynamicHeightRatio = renderTargetManager->dynamicHeightRatio;
-		originalDynamicWidthRatio = renderTargetManager->dynamicWidthRatio;
+		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
 
 		if (requiresOverride) {
 
@@ -73,16 +73,15 @@ struct DrawWorld_Imagespace_RenderEffectRange
 			func(This, 0, 3, 1, 1);
 			upscaling->OverrideRenderTargets({1, 4, 29, 16});
 			upscaling->OverrideDepth(true);
-			renderTargetManager->dynamicHeightRatio = 1.0f;
-			renderTargetManager->dynamicWidthRatio = 1.0f;
+			Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
 
 			// LDR shaders
 			func(This, 4, 13, 1, 1);
 			upscaling->ResetDepth();
 			upscaling->ResetRenderTargets({4});
 
-			renderTargetManager->dynamicHeightRatio = originalDynamicHeightRatio;
-			renderTargetManager->dynamicWidthRatio = originalDynamicWidthRatio;
+			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		} else {
 			func(This, a2, a3, a4, a5);
 		}
@@ -105,46 +104,10 @@ struct DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport
 
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
 
-		originalDynamicHeightRatio = renderTargetManager->dynamicHeightRatio;
-		originalDynamicWidthRatio = renderTargetManager->dynamicWidthRatio;
+		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
 
-		renderTargetManager->dynamicHeightRatio = 1.0f;
-		renderTargetManager->dynamicWidthRatio = 1.0f;
-		renderTargetManager->isDynamicResolutionCurrentlyActivated = false;
-
-		static bool layoutLogged = false;
-		if (!layoutLogged) {
-			auto base = reinterpret_cast<uintptr_t>(renderTargetManager);
-
-			// Probe every array/field offset in the struct to find the 0x30 shift
-			REX::INFO("[LAYOUT] RenderTargetManager base={:#x}", base);
-			REX::INFO("[LAYOUT] CommonLibF4 offsets (compiled):");
-			REX::INFO("[LAYOUT]   renderTargetData:      {:#x} (expect 0x000)", reinterpret_cast<uintptr_t>(&renderTargetManager->renderTargetData[0]) - base);
-			REX::INFO("[LAYOUT]   depthStencilTargetData: {:#x} (expect 0xC80)", reinterpret_cast<uintptr_t>(&renderTargetManager->depthStencilTargetData[0]) - base);
-			REX::INFO("[LAYOUT]   cubeMapRenderTargetData:{:#x} (expect 0xDA0)", reinterpret_cast<uintptr_t>(&renderTargetManager->cubeMapRenderTargetData[0]) - base);
-			REX::INFO("[LAYOUT]   renderTargetID:         {:#x} (expect 0xDC4)", reinterpret_cast<uintptr_t>(&renderTargetManager->renderTargetID[0]) - base);
-			REX::INFO("[LAYOUT]   depthStencilTargetID:   {:#x} (expect 0xF54)", reinterpret_cast<uintptr_t>(&renderTargetManager->depthStencilTargetID[0]) - base);
-			REX::INFO("[LAYOUT]   cubeMapRenderTargetID:  {:#x} (expect 0xF84)", reinterpret_cast<uintptr_t>(&renderTargetManager->cubeMapRenderTargetID[0]) - base);
-			REX::INFO("[LAYOUT]   dynamicWidthRatio:      {:#x} (expect 0xF88)", reinterpret_cast<uintptr_t>(&renderTargetManager->dynamicWidthRatio) - base);
-
-			// Now probe actual OG values by scanning for the known ratio value
-			// The actual dynamicWidthRatio should be ~0.333 at this point (before we reset it)
-			// Scan from the struct start to find where 0.333... actually lives
-			REX::INFO("[LAYOUT] Probing actual memory for ratio value {:.6f}:", originalDynamicWidthRatio);
-			auto* mem = reinterpret_cast<float*>(base);
-			for (int i = 0xF00 / 4; i < 0x1100 / 4; i++) {
-				if (std::abs(mem[i] - originalDynamicWidthRatio) < 0.0001f) {
-					REX::INFO("[LAYOUT]   Found ratio at offset {:#x} (value={})", i * 4, mem[i]);
-				}
-			}
-
-			REX::INFO("[LAYOUT] sizeof: RenderTargetProperties={:#x}, DepthStencilTargetProperties={:#x}, CubeMapRenderTargetProperties={:#x}",
-				sizeof(RE::BSGraphics::RenderTargetProperties),
-				sizeof(RE::BSGraphics::DepthStencilTargetProperties),
-				sizeof(RE::BSGraphics::CubeMapRenderTargetProperties));
-
-			layoutLogged = true;
-		}
+		Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -189,16 +152,15 @@ struct DrawWorld_Render_PreUI_NVHBAO
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
-		bool requiresOverride = renderTargetManager->dynamicHeightRatio != 1.0 || renderTargetManager->dynamicWidthRatio != 1.0;
+		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
-		originalDynamicHeightRatio = renderTargetManager->dynamicHeightRatio;
-		originalDynamicWidthRatio = renderTargetManager->dynamicWidthRatio;
+		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
 
 		if (requiresOverride) {
 			upscaling->OverrideDepth(true);
 			upscaling->OverrideRenderTargets({20});
-			renderTargetManager->dynamicHeightRatio = 1.0f;
-			renderTargetManager->dynamicWidthRatio = 1.0f;
+			Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
 		}
 
 		func(This);
@@ -206,8 +168,8 @@ struct DrawWorld_Render_PreUI_NVHBAO
 		if (requiresOverride) {
 			upscaling->ResetDepth();
 			upscaling->ResetRenderTargets({25});
-			renderTargetManager->dynamicHeightRatio = originalDynamicHeightRatio;
-			renderTargetManager->dynamicWidthRatio = originalDynamicWidthRatio;
+			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -221,16 +183,15 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
-		bool requiresOverride = renderTargetManager->dynamicHeightRatio != 1.0 || renderTargetManager->dynamicWidthRatio != 1.0;
+		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
-		originalDynamicHeightRatio = renderTargetManager->dynamicHeightRatio;
-		originalDynamicWidthRatio = renderTargetManager->dynamicWidthRatio;
+		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
 
 		if (requiresOverride) {
 			upscaling->OverrideRenderTargets({20, 25, 57, 24, 23, 58, 59, 3, 9, 60, 61, 28});
 			upscaling->OverrideDepth(true);
-			renderTargetManager->dynamicHeightRatio = 1.0f;
-			renderTargetManager->dynamicWidthRatio = 1.0f;
+			Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
 		}
 
 		func(This, a2, a3);
@@ -238,8 +199,8 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 		if (requiresOverride) {
 			upscaling->ResetRenderTargets({4});
 			upscaling->ResetDepth();
-			renderTargetManager->dynamicHeightRatio = originalDynamicHeightRatio;
-			renderTargetManager->dynamicWidthRatio = originalDynamicWidthRatio;
+			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -253,7 +214,7 @@ struct BSImagespaceShaderLensFlare_RenderLensFlare
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
-		bool requiresOverride = renderTargetManager->dynamicHeightRatio != 1.0 || renderTargetManager->dynamicWidthRatio != 1.0;
+		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
 		if (requiresOverride)
 			upscaling->OverrideDepth(true);
@@ -300,9 +261,7 @@ struct LoadingMenu_Render_UpdateTemporalData
 		func(This);
 
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
-		renderTargetManager->dynamicHeightRatio = 1.0f;
-		renderTargetManager->dynamicWidthRatio = 1.0f;
-		renderTargetManager->isDynamicResolutionCurrentlyActivated = false;
+		Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -316,9 +275,8 @@ struct DrawWorld_Imagespace
 
 		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
 
-		renderTargetManager->dynamicHeightRatio = originalDynamicHeightRatio;
-		renderTargetManager->dynamicWidthRatio = originalDynamicWidthRatio;
-		renderTargetManager->isDynamicResolutionCurrentlyActivated = renderTargetManager->dynamicWidthRatio != 1.0 || renderTargetManager->dynamicHeightRatio != 1.0;
+		Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -705,8 +663,8 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 	// This ensures code that queries render target dimensions get the correct values
 	for (int i = 0; i < 100; i++) {
 		originalRenderTargetData[i] = renderTargetManager->renderTargetData[i];
-		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * renderTargetManager->dynamicWidthRatio);
-		renderTargetManager->renderTargetData[i].height = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].height) * renderTargetManager->dynamicHeightRatio);
+		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * Util::GetGameDynamicWidthRatio(renderTargetManager));
+		renderTargetManager->renderTargetData[i].height = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].height) * Util::GetGameDynamicHeightRatio(renderTargetManager));
 	}
 
 	// Check and override pixel shader SRVs that reference original render targets
@@ -914,13 +872,13 @@ void Upscaling::CopyDepth()
 
 	// Calculate both display (screen) and render (scaled) resolutions
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio, screenSize.y * renderTargetManager->dynamicHeightRatio);
+	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
 		REX::INFO("[DEPTH] First CopyDepth: screen={}x{}, render={}x{}, widthRatio={:.4f}, heightRatio={:.4f}",
 			(uint)screenSize.x, (uint)screenSize.y, (uint)renderSize.x, (uint)renderSize.y,
-			renderTargetManager->dynamicWidthRatio, renderTargetManager->dynamicHeightRatio);
+			Util::GetGameDynamicWidthRatio(renderTargetManager), Util::GetGameDynamicHeightRatio(renderTargetManager));
 		loggedOnce = true;
 	}
 
@@ -1213,10 +1171,8 @@ void Upscaling::UpdateUpscaling()
 	originalDynamicHeightRatio = resolutionScale;
 	originalDynamicWidthRatio = resolutionScale;
 
-	renderTargetManager->dynamicHeightRatio = originalDynamicHeightRatio;
-	renderTargetManager->dynamicWidthRatio = originalDynamicWidthRatio;
-
-	renderTargetManager->isDynamicResolutionCurrentlyActivated = renderTargetManager->dynamicWidthRatio != 1.0 || renderTargetManager->dynamicHeightRatio != 1.0;
+	Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+		originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 
 	CheckResources();
 }
@@ -1244,7 +1200,7 @@ void Upscaling::Upscale()
 	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio, screenSize.y * renderTargetManager->dynamicHeightRatio);
+	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
@@ -1257,7 +1213,7 @@ void Upscaling::Upscale()
 			jitter.x, jitter.y, settings.qualityMode);
 		REX::INFO("[UPSCALE] FrameBuffer texture: {}x{} format={}", fbDesc.Width, fbDesc.Height, (uint)fbDesc.Format);
 		REX::INFO("[UPSCALE] Upscaling texture: {}x{} format={}", utDesc.Width, utDesc.Height, (uint)utDesc.Format);
-		REX::INFO("[UPSCALE] dynamicWidthRatio={}, dynamicHeightRatio={}", renderTargetManager->dynamicWidthRatio, renderTargetManager->dynamicHeightRatio);
+		REX::INFO("[UPSCALE] dynamicWidthRatio={}, dynamicHeightRatio={}", Util::GetGameDynamicWidthRatio(renderTargetManager), Util::GetGameDynamicHeightRatio(renderTargetManager));
 		loggedOnce = true;
 	}
 

@@ -1114,6 +1114,12 @@ void Upscaling::UpdateGameSettings()
 
 void Upscaling::UpdateUpscaling()
 {
+	static bool firstCall = true;
+	if (firstCall) {
+		REX::INFO("[UPSCALE] UpdateUpscaling first call");
+		firstCall = false;
+	}
+
 	static auto gameViewport = Util::State_GetSingleton();
 	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
 
@@ -1210,10 +1216,16 @@ void Upscaling::Upscale()
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
+		D3D11_TEXTURE2D_DESC fbDesc{}, utDesc{};
+		static_cast<ID3D11Texture2D*>(frameBufferResource)->GetDesc(&fbDesc);
+		upscalingTexture->resource->GetDesc(&utDesc);
 		REX::INFO("[UPSCALE] First Upscale dispatch: method={} (1=FSR, 2=DLSS), screen={}x{}, render={}x{}, jitter=({}, {}), qualityMode={}",
 			static_cast<uint>(upscaleMethod),
 			(uint)screenSize.x, (uint)screenSize.y, (uint)renderSize.x, (uint)renderSize.y,
 			jitter.x, jitter.y, settings.qualityMode);
+		REX::INFO("[UPSCALE] FrameBuffer texture: {}x{} format={}", fbDesc.Width, fbDesc.Height, (uint)fbDesc.Format);
+		REX::INFO("[UPSCALE] Upscaling texture: {}x{} format={}", utDesc.Width, utDesc.Height, (uint)utDesc.Format);
+		REX::INFO("[UPSCALE] dynamicWidthRatio={}, dynamicHeightRatio={}", renderTargetManager->dynamicWidthRatio, renderTargetManager->dynamicHeightRatio);
 		loggedOnce = true;
 	}
 

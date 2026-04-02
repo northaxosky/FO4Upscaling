@@ -13,8 +13,8 @@ else
 fi
 
 RESULTS_DIR="$PROJECT_ROOT/test-results/$(date +%Y%m%d_%H%M%S)"
-TIMEOUT_SECONDS=120
-STABILIZE_SECONDS=30
+TIMEOUT_SECONDS=180
+STABILIZE_SECONDS=15
 
 # Kill any existing game/MO2 instances
 cleanup_processes() {
@@ -64,7 +64,7 @@ while (( SECONDS - GAME_START < TIMEOUT_SECONDS )); do
         break
     fi
 
-    if [ -f "$UPSCALING_LOG" ] && grep -q "\[INIT\]\|Data loaded\|\[HOOK\].*complete" "$UPSCALING_LOG" 2>/dev/null; then
+    if [ -f "$UPSCALING_LOG" ] && grep -q "\[UPSCALE\]\|\[RES\]\|\[RT\].*Recreating\|UpdateUpscaling first" "$UPSCALING_LOG" 2>/dev/null; then
         echo "Upscaling plugin loaded successfully"
         echo "Stabilizing for ${STABILIZE_SECONDS}s..."
         sleep $STABILIZE_SECONDS
@@ -97,6 +97,7 @@ powershell.exe -Command "
 # Take screenshot if game is still running
 if $SUCCESS && tasklist.exe 2>/dev/null | grep -qi "Fallout4"; then
     SCREENSHOT_FILE="$RESULTS_DIR/screenshot.png"
+    SCREENSHOT_WIN=$(cygpath -w "$SCREENSHOT_FILE")
     powershell.exe -Command "
         Add-Type -AssemblyName System.Windows.Forms
         Add-Type -AssemblyName System.Drawing
@@ -104,7 +105,7 @@ if $SUCCESS && tasklist.exe 2>/dev/null | grep -qi "Fallout4"; then
         \$bmp = New-Object System.Drawing.Bitmap(\$screen.Width, \$screen.Height)
         \$gfx = [System.Drawing.Graphics]::FromImage(\$bmp)
         \$gfx.CopyFromScreen(\$screen.Location, [System.Drawing.Point]::Empty, \$screen.Size)
-        \$bmp.Save('$SCREENSHOT_FILE', [System.Drawing.Imaging.ImageFormat]::Png)
+        \$bmp.Save('$SCREENSHOT_WIN', [System.Drawing.Imaging.ImageFormat]::Png)
         \$gfx.Dispose()
         \$bmp.Dispose()
     " 2>/dev/null && echo "Screenshot captured: $SCREENSHOT_FILE" || echo "Screenshot failed"

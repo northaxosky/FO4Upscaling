@@ -107,15 +107,6 @@ void DX12SwapChain::CreateSwapChainDLSSG(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP
 
 	DX::ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain)));
 
-	// Let Streamline intercept this swap chain for DLSS-G frame generation
-	auto streamline = StreamlineFG::GetSingleton();
-	if (streamline->initialized) {
-		streamline->UpgradeSwapChain(swapChain);
-		REX::INFO("[DLSSG] Swap chain upgraded for Streamline");
-	} else {
-		REX::WARN("[DLSSG] Streamline not initialized, swap chain not upgraded");
-	}
-
 	REX::INFO("[DLSSG] D3D12 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
 }
 
@@ -219,15 +210,15 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		if (auto ui = RE::UI::GetSingleton())
 			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !main->inMenuMode && !ui->movementToDirectionalCount;
 
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		// DLSS-G: Tag resources and let Streamline handle frame gen during Present
-		auto streamline = StreamlineFG::GetSingleton();
-		streamline->TagResources(
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG && useFrameGenerationThisFrame) {
+		// DLSS-G via NGX direct API
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->EvaluateFrameGen(
 			commandLists[frameIndex].get(),
+			swapChainBuffers[frameIndex].get(),
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get());
-		streamline->Present(useFrameGenerationThisFrame);
 	} else {
 		// FSR3: Dispatch frame generation via FidelityFX
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);

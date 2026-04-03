@@ -17,6 +17,11 @@ configure_xse_plugin(${PLUGIN_NAME} 1 3 3)
 # Streamline (NVIDIA DLSS-G Frame Generation)
 add_subdirectory(${CMAKE_SOURCE_DIR}/cmake/Streamline ${CMAKE_CURRENT_BINARY_DIR}/Streamline)
 
+# NGX SDK (for DLSS-G direct API)
+target_include_directories(${PLUGIN_NAME} PRIVATE
+	${CMAKE_SOURCE_DIR}/extern/Streamline/external/ngx-sdk/include
+)
+
 target_link_libraries(${PLUGIN_NAME} PRIVATE
 	debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
 	optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
@@ -27,4 +32,5 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 	magic_enum::magic_enum
 	d3dcompiler.lib
 	Streamline
+	${CMAKE_SOURCE_DIR}/extern/Streamline/external/ngx-sdk/lib/Windows_x86_64/nvsdk_ngx_d.lib
 )

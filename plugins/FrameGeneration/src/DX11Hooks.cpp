@@ -125,24 +125,37 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				proxy->CreateD3D12Device(adapter);
 
-				proxy->CreateD3D12CommandQueues();
-
-				// Initialize NGX for DLSS-G
+				// For DLSS-G: init Streamline + NGX before creating command queues/swap chain
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
+
+					// Step 1: Init Streamline (eD3D11 mode for interposer)
+					dlssg->InitStreamline();
+
+					// Step 2: Set D3D12 device for Streamline
+					dlssg->SetD3DDevice(proxy->d3d12Device.get());
+
+					// Step 3: Init NGX for frame gen feature
 					if (!dlssg->InitNGX(proxy->d3d12Device.get())) {
 						REX::WARN("[FG] NGX init failed, falling back to FSR3");
 						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 					}
 				}
 
+				proxy->CreateD3D12CommandQueues();
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
+
+				// For DLSS-G: upgrade swap chain for Streamline interception
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto dlssg = StreamlineFG::GetSingleton();
+					dlssg->UpgradeSwapChain(&proxy->swapChain);
+				}
+
 				proxy->CreateInterop();
 
 				// Create DLSS-G frame gen feature after swap chain is ready
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
-					// Reset command list for feature creation
 					proxy->commandAllocators[0]->Reset();
 					proxy->commandLists[0]->Reset(proxy->commandAllocators[0].get(), nullptr);
 
@@ -152,7 +165,6 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 					}
 
-					// Close and execute the command list
 					proxy->commandLists[0]->Close();
 					ID3D12CommandList* cmds[] = { proxy->commandLists[0].get() };
 					proxy->commandQueue->ExecuteCommandLists(1, cmds);
@@ -201,7 +213,9 @@ void DX11Hooks::Install()
 	fidelityFX->LoadFFX();
 
 	if (upscaling->settings.frameGenType == 1) {
-		REX::INFO("[FG] DLSS-G requested via NGX direct API");
+		REX::INFO("[FG] DLSS-G requested, loading Streamline interposer");
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->LoadInterposer();
 	}
 
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);

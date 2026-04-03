@@ -54,6 +54,12 @@ deploy() {
     cp "$PACKAGE_DIR/F4SE/Plugins/Upscaling/"*.hlsl "$DEST/Upscaling/" 2>/dev/null && echo "  Upscaling shaders deployed" || true
     cp "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/"*.hlsl "$DEST/FrameGeneration/" 2>/dev/null && echo "  FrameGen shaders deployed" || true
 
+    # Shared Streamline DLLs (used by both frame gen and upscaling)
+    if [ -d "$PACKAGE_DIR/F4SE/Plugins/Streamline" ]; then
+        mkdir -p "$DEST/Streamline"
+        cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/"*.dll "$DEST/Streamline/" 2>/dev/null && echo "  Shared Streamline DLLs deployed" || true
+    fi
+
     # Config files
     cp -u "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration.ini" "$DEST/FrameGeneration.ini" 2>/dev/null || true
     mkdir -p "$MOD_DIR/MCM/Config/Upscaling"

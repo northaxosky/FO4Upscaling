@@ -2,7 +2,7 @@
 
 void StreamlineFG::LoadInterposer()
 {
-	interposer = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\Streamline\\sl.interposer.dll");
+	interposer = LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.interposer.dll");
 	if (!interposer) {
 		auto errorCode = GetLastError();
 		REX::INFO("[DLSSG] Failed to load interposer: Error Code {0:x}", errorCode);
@@ -30,27 +30,37 @@ void StreamlineFG::Initialize()
 {
 	REX::INFO("[DLSSG] Initializing Streamline for DLSS Frame Generation");
 
-	sl::Preferences pref;
-	pref.showConsole = false;
+	sl::Preferences pref{};
+
+	sl::Feature featuresToLoad[] = { sl::kFeatureDLSS };
+	pref.featuresToLoad = featuresToLoad;
+	pref.numFeaturesToLoad = _countof(featuresToLoad);
+
 	pref.logLevel = sl::LogLevel::eOff;
-	pref.pathsToPlugins = {};
-	pref.numPathsToPlugins = 0;
-	pref.pathToLogsAndData = {};
-	pref.allocateCallback = nullptr;
-	pref.releaseCallback = nullptr;
+	pref.logMessageCallback = nullptr;
+	pref.showConsole = false;
 
-	sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeatureDLSS };
-	pref.featuresToLoad = features;
-	pref.numFeaturesToLoad = _countof(features);
-
-	pref.flags |= sl::PreferenceFlags::eUseManualHooking;
-	pref.renderAPI = sl::RenderAPI::eD3D12;
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f4-frame-generation";
+	pref.flags |= sl::PreferenceFlags::eUseManualHooking;
 
-	if (SL_FAILED(result, slInit(pref, sl::kSDKVersion))) {
-		REX::CRITICAL("[DLSSG] Failed to initialize Streamline");
+	pref.renderAPI = sl::RenderAPI::eD3D11;
+
+	REX::INFO("[DLSSG] Calling slInit with renderAPI=eD3D11, {} features", pref.numFeaturesToLoad);
+
+	sl::Result initResult = sl::Result::eErrorNotInitialized;
+	__try {
+		initResult = slInit(pref, sl::kSDKVersion);
+	} __except(EXCEPTION_EXECUTE_HANDLER) {
+		REX::CRITICAL("[DLSSG] slInit crashed with SEH exception code {:#x}", GetExceptionCode());
+		return;
+	}
+
+	REX::INFO("[DLSSG] slInit returned: {}", (int)initResult);
+
+	if (initResult != sl::Result::eOk) {
+		REX::CRITICAL("[DLSSG] Failed to initialize Streamline (result={})", (int)initResult);
 		return;
 	}
 

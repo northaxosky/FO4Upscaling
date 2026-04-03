@@ -150,8 +150,9 @@ public:
 	// State
 	// ========================================
 
-	bool initialized = false;  ///< True if Streamline SDK is initialized
-	bool featureDLSS = false;  ///< True if DLSS is available on current GPU
+	bool initialized = false;       ///< True if Streamline SDK is initialized
+	bool alreadyInitialized = false; ///< True if another plugin already called slInit
+	bool featureDLSS = false;       ///< True if DLSS is available on current GPU
 
 	sl::ViewportHandle viewport{ 0 };  ///< Streamline viewport handle
 	sl::FrameToken* frameToken;        ///< Current frame token for Streamline

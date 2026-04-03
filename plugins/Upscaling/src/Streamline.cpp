@@ -6,7 +6,15 @@
 
 void Streamline::LoadInterposer()
 {
-	interposer = LoadLibraryW(L"Data/F4SE/Plugins/Upscaling/Streamline/sl.interposer.dll");
+	// Check if the FrameGeneration plugin already loaded an interposer
+	interposer = GetModuleHandleW(L"sl.interposer.dll");
+	if (interposer) {
+		alreadyInitialized = true;
+		REX::INFO("[Streamline] Interposer already loaded by FrameGeneration plugin at {0:p}", static_cast<void*>(interposer));
+		return;
+	}
+
+	interposer = LoadLibraryW(L"Data/F4SE/Plugins/Streamline/sl.interposer.dll");
 	if (interposer == nullptr) {
 		DWORD errorCode = GetLastError();
 		REX::INFO("[Streamline] Failed to load interposer: Error Code {0:x}", errorCode);
@@ -55,7 +63,10 @@ void Streamline::Initialize()
 	slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
 	slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
 
-	if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
+	if (alreadyInitialized) {
+		REX::INFO("[Streamline] Skipping slInit — already initialized by FrameGeneration plugin");
+		initialized = true;
+	} else if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
 		REX::CRITICAL("[Streamline] Failed to initialize Streamline");
 	} else {
 		initialized = true;

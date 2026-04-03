@@ -39,16 +39,28 @@ bool StreamlineFG::InitNGX(ID3D12Device* a_device)
 		return false;
 	}
 
-	result = NVSDK_NGX_D3D12_AllocateParameters(&ngxParams);
+	result = NVSDK_NGX_D3D12_GetCapabilityParameters(&ngxParams);
 	if (NVSDK_NGX_FAILED(result)) {
-		REX::ERROR("[DLSSG] Failed to allocate NGX parameters");
-		return false;
+		REX::WARN("[DLSSG] GetCapabilityParameters failed ({}), trying AllocateParameters", (uint32_t)result);
+		result = NVSDK_NGX_D3D12_AllocateParameters(&ngxParams);
+		if (NVSDK_NGX_FAILED(result)) {
+			REX::ERROR("[DLSSG] Failed to allocate NGX parameters");
+			return false;
+		}
 	}
 
-	// Check if frame generation is available
+	// Query frame gen capabilities
 	int fgAvailable = 0;
 	ngxParams->Get(NVSDK_NGX_Parameter_FrameInterpolation_FeatureInitResult, &fgAvailable);
 	REX::INFO("[DLSSG] FrameInterpolation feature init result: {}", fgAvailable);
+
+	int needsDriver = 0;
+	ngxParams->Get(NVSDK_NGX_Parameter_FrameInterpolation_NeedsUpdatedDriver, &needsDriver);
+	REX::INFO("[DLSSG] NeedsUpdatedDriver: {}", needsDriver);
+
+	unsigned int minDriverMajor = 0;
+	ngxParams->Get(NVSDK_NGX_Parameter_FrameInterpolation_MinDriverVersionMajor, &minDriverMajor);
+	REX::INFO("[DLSSG] MinDriverVersionMajor: {}", minDriverMajor);
 
 	ngxInitialized = true;
 	REX::INFO("[DLSSG] NGX initialized successfully");
@@ -61,10 +73,16 @@ bool StreamlineFG::CreateFrameGenFeature(ID3D12GraphicsCommandList* a_cmdList, u
 
 	REX::INFO("[DLSSG] Creating frame gen feature: {}x{}", a_width, a_height);
 
-	NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_EParameter_Width, a_width);
-	NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_EParameter_Height, a_height);
-	NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_EParameter_OutWidth, a_width);
-	NVSDK_NGX_Parameter_SetUI(ngxParams, NVSDK_NGX_EParameter_OutHeight, a_height);
+	ngxParams->Set(NVSDK_NGX_Parameter_Width, a_width);
+	ngxParams->Set(NVSDK_NGX_Parameter_Height, a_height);
+	ngxParams->Set(NVSDK_NGX_Parameter_OutWidth, a_width);
+	ngxParams->Set(NVSDK_NGX_Parameter_OutHeight, a_height);
+	ngxParams->Set(NVSDK_NGX_Parameter_Resource_Width, a_width);
+	ngxParams->Set(NVSDK_NGX_Parameter_Resource_Height, a_height);
+	ngxParams->Set(NVSDK_NGX_Parameter_Resource_OutWidth, a_width);
+	ngxParams->Set(NVSDK_NGX_Parameter_Resource_OutHeight, a_height);
+	ngxParams->Set("FrameInterpolation.EnableInterpolation", 1);
+	ngxParams->Set("FrameInterpolation.IsRecording", 0);
 
 	auto result = NVSDK_NGX_D3D12_CreateFeature(
 		a_cmdList,

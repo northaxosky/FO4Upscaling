@@ -7,6 +7,7 @@
 #include "DX12SwapChain.h"
 #include "FidelityFX.h"
 #include "Streamline.h"
+#include <nvsdk_ngx.h>
 
 #include "ENB/ENBSeriesAPI.h"
 
@@ -125,9 +126,14 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				proxy->CreateD3D12Device(adapter);
 
-				// For DLSS-G: init Streamline before creating swap chain
+				// For DLSS-G: init NGX first, then Streamline
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
+
+					// Init NGX FIRST so sl.dlss_g can query feature requirements
+					NVSDK_NGX_D3D12_Init(0x12345678, L".", proxy->d3d12Device.get());
+					REX::INFO("[FG] NGX pre-initialized for DLSS-G");
+
 					dlssg->InitStreamline();
 					dlssg->SetD3DDevice(proxy->d3d12Device.get());
 				}

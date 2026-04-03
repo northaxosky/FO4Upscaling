@@ -90,12 +90,29 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	// Skip feature support check — we know we have an RTX 40+ from GPU logging
 	// slIsFeatureSupported returns MissingOrInvalidAPI with eD3D11 render API
 	// but the feature works through the swap chain interception pathway
-	REX::INFO("[DLSSG] Skipping feature support check, attempting direct enable");
+	// Try to explicitly enable the feature before loading functions
+	auto slSetFeatureLoaded = (PFun_slSetFeatureLoaded*)GetProcAddress(interposer, "slSetFeatureLoaded");
+	auto slIsFeatureLoaded = (PFun_slIsFeatureLoaded*)GetProcAddress(interposer, "slIsFeatureLoaded");
+
+	if (slIsFeatureLoaded) {
+		bool loaded = false;
+		auto r = slIsFeatureLoaded(sl::kFeatureDLSS_G, loaded);
+		REX::INFO("[DLSSG] Feature loaded? {} (result={})", loaded, (int)r);
+	}
+
+	if (slSetFeatureLoaded) {
+		auto r = slSetFeatureLoaded(sl::kFeatureDLSS_G, true);
+		REX::INFO("[DLSSG] SetFeatureLoaded result: {}", (int)r);
+	}
+
+	REX::INFO("[DLSSG] Loading DLSS-G feature functions");
 
 	// Load DLSS-G specific functions
 	if (slGetFeatureFunction) {
-		slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
-		slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
+		auto r1 = slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
+		auto r2 = slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
+		REX::INFO("[DLSSG] slDLSSGSetOptions load: {} (ptr={:#x})", (int)r1, (uintptr_t)slDLSSGSetOptions);
+		REX::INFO("[DLSSG] slDLSSGGetState load: {} (ptr={:#x})", (int)r2, (uintptr_t)slDLSSGGetState);
 	}
 
 	if (!slDLSSGSetOptions) {
@@ -132,8 +149,20 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 
 void StreamlineFG::Present(bool a_useFrameGen)
 {
-	// DLSS-G frame generation is handled by Streamline's swap chain interception
-	// We just need to enable/disable it via slDLSSGSetOptions
+	// Lazy init — try loading feature functions on first Present if not loaded yet
+	if (!slDLSSGSetOptions && slGetFeatureFunction && slInitialized) {
+		static int retryCount = 0;
+		if (retryCount < 5) {
+			slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
+			slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
+			retryCount++;
+			if (slDLSSGSetOptions) {
+				REX::INFO("[DLSSG] Feature functions loaded on retry {}", retryCount);
+				featureDLSSG = true;
+			}
+		}
+	}
+
 	if (!featureDLSSG || !slDLSSGSetOptions) return;
 
 	sl::DLSSGOptions options{};

@@ -32,9 +32,31 @@ void StreamlineFG::Initialize()
 
 	sl::Preferences pref{};
 
-	sl::Feature featuresToLoad[] = { sl::kFeatureDLSS };
+	sl::Feature featuresToLoad[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeatureDLSS };
 	pref.featuresToLoad = featuresToLoad;
 	pref.numFeaturesToLoad = _countof(featuresToLoad);
+
+	// Get the directory where sl.interposer.dll is loaded from
+	wchar_t interposerPath[MAX_PATH];
+	GetModuleFileNameW(interposer, interposerPath, MAX_PATH);
+	// Strip filename to get directory
+	wchar_t* lastSlash = wcsrchr(interposerPath, L'\\');
+	if (!lastSlash) lastSlash = wcsrchr(interposerPath, L'/');
+	if (lastSlash) *lastSlash = L'\0';
+
+	{
+		char pathBuf[MAX_PATH];
+		GetModuleFileNameA(interposer, pathBuf, MAX_PATH);
+		char* ls = strrchr(pathBuf, '\\');
+		if (!ls) ls = strrchr(pathBuf, '/');
+		if (ls) *ls = '\0';
+		REX::INFO("[DLSSG] Plugin search path: {}", pathBuf);
+	}
+
+	static const wchar_t* pluginPaths[1];
+	pluginPaths[0] = interposerPath;
+	pref.pathsToPlugins = pluginPaths;
+	pref.numPathsToPlugins = 1;
 
 	pref.logLevel = sl::LogLevel::eOff;
 	pref.logMessageCallback = nullptr;
@@ -47,16 +69,19 @@ void StreamlineFG::Initialize()
 
 	pref.renderAPI = sl::RenderAPI::eD3D11;
 
+	// Pre-load Streamline plugin DLLs so they're in memory when slInit searches
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.reflex.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.pcl.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\nvngx_dlssg.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\nvngx_dlss.dll");
+	REX::INFO("[DLSSG] Pre-loaded Streamline plugin DLLs");
+
 	REX::INFO("[DLSSG] Calling slInit with renderAPI=eD3D11, {} features", pref.numFeaturesToLoad);
 
-	sl::Result initResult = sl::Result::eErrorNotInitialized;
-	__try {
-		initResult = slInit(pref, sl::kSDKVersion);
-	} __except(EXCEPTION_EXECUTE_HANDLER) {
-		REX::CRITICAL("[DLSSG] slInit crashed with SEH exception code {:#x}", GetExceptionCode());
-		return;
-	}
-
+	auto initResult = slInit(pref, sl::kSDKVersion);
 	REX::INFO("[DLSSG] slInit returned: {}", (int)initResult);
 
 	if (initResult != sl::Result::eOk) {
@@ -80,14 +105,29 @@ void StreamlineFG::CheckFeatures(IDXGIAdapter* a_adapter)
 	a_adapter->GetDesc(&desc);
 	adapterInfo.deviceLUID = (uint8_t*)&desc.AdapterLuid;
 
-	// Check DLSS-G
+	// Check if DLSS-G plugin is loaded
+	bool dlssgLoaded = false;
+	if (slIsFeatureLoaded) {
+		auto loadedResult = slIsFeatureLoaded(sl::kFeatureDLSS_G, dlssgLoaded);
+		REX::INFO("[DLSSG] Feature loaded check: result={}, loaded={}", (int)loadedResult, dlssgLoaded);
+	}
+
+	// Check DLSS-G support
 	auto dlssgResult = slIsFeatureSupported(sl::kFeatureDLSS_G, adapterInfo);
 	if (dlssgResult == sl::Result::eOk) {
 		featureDLSSG = true;
 		REX::INFO("[DLSSG] DLSS Frame Generation is supported");
 	} else {
 		featureDLSSG = false;
-		REX::INFO("[DLSSG] DLSS Frame Generation is NOT supported (result={})", (int)dlssgResult);
+		REX::INFO("[DLSSG] DLSS Frame Generation is NOT supported (result={}: {})", (int)dlssgResult,
+			dlssgResult == sl::Result::eErrorMissingOrInvalidAPI ? "MissingOrInvalidAPI" :
+			dlssgResult == sl::Result::eErrorNoSupportedAdapterFound ? "NoSupportedAdapter" :
+			dlssgResult == sl::Result::eErrorAdapterNotSupported ? "AdapterNotSupported" :
+			dlssgResult == sl::Result::eErrorFeatureNotSupported ? "FeatureNotSupported" :
+			dlssgResult == sl::Result::eErrorFeatureMissing ? "FeatureMissing" :
+			dlssgResult == sl::Result::eErrorFeatureFailedToLoad ? "FeatureFailedToLoad" :
+			dlssgResult == sl::Result::eErrorOSDisabledHWS ? "OSDisabledHWS" :
+			"Unknown");
 	}
 
 	// Check Reflex

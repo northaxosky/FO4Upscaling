@@ -57,25 +57,35 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 	auto upscaling = Upscaling::GetSingleton();
 
 	if (pSwapChainDesc->Windowed) {
+		// Log GPU info
+		if (pAdapter) {
+			DXGI_ADAPTER_DESC adapterDesc;
+			if (SUCCEEDED(pAdapter->GetDesc(&adapterDesc))) {
+				std::string gpuName;
+				for (int i = 0; i < 128 && adapterDesc.Description[i]; i++)
+					gpuName += static_cast<char>(adapterDesc.Description[i]);
+				REX::INFO("[FG] GPU: {} (VRAM: {}MB, VendorId: {:#x}, DeviceId: {:#x})",
+					gpuName, adapterDesc.DedicatedVideoMemory / (1024 * 1024),
+					adapterDesc.VendorId, adapterDesc.DeviceId);
+			}
+		}
+
 		REX::INFO("[Frame Generation] Frame Generation enabled, using D3D12 proxy");
-		
+
 		auto fidelityFX = FidelityFX::GetSingleton();
 
 		bool hasBackend = fidelityFX->module;
 
-		// For DLSS-G, check if Streamline is ready and the hardware supports it
+		// For DLSS-G, initialize Streamline now that D3D context exists
 		if (upscaling->settings.frameGenType == 1) {
 			auto streamline = StreamlineFG::GetSingleton();
+			if (streamline->interposer && !streamline->initialized) {
+				streamline->Initialize();
+			}
 			if (streamline->initialized) {
-				streamline->CheckFeatures(pAdapter);
-				if (streamline->featureDLSSG) {
-					upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
-					hasBackend = true;
-					REX::INFO("[FG] DLSS-G hardware supported, using DLSS Frame Generation");
-				} else {
-					REX::WARN("[FG] DLSS-G not supported on this GPU, falling back to FSR3");
-					upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
-				}
+				// Tentatively set DLSS-G — feature check deferred until after D3D12 device setup
+				upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
+				hasBackend = true;
 			} else {
 				REX::WARN("[FG] Streamline not initialized, falling back to FSR3");
 				upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
@@ -125,11 +135,18 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				proxy->CreateD3D12Device(adapter);
 
-				// Set D3D12 device for Streamline if using DLSS-G
+				// Set D3D12 device and check DLSS-G support
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto streamline = StreamlineFG::GetSingleton();
 					streamline->SetD3DDevice(proxy->d3d12Device.get());
+					streamline->CheckFeatures(adapter);
 					streamline->PostDevice();
+					if (!streamline->featureDLSSG) {
+						REX::WARN("[FG] DLSS-G not supported, falling back to FSR3");
+						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+					} else {
+						REX::INFO("[FG] DLSS-G confirmed available on RTX 4090");
+					}
 				}
 
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
@@ -177,14 +194,12 @@ void DX11Hooks::Install()
 	// Always load FidelityFX as fallback
 	fidelityFX->LoadFFX();
 
-	// Load Streamline if DLSS-G is requested
+	// Load Streamline interposer DLL if DLSS-G is requested (init deferred to device creation)
 	if (upscaling->settings.frameGenType == 1) {
 		REX::INFO("[FG] DLSS-G requested, loading Streamline interposer");
 		auto streamline = StreamlineFG::GetSingleton();
 		streamline->LoadInterposer();
-		if (streamline->interposer) {
-			streamline->Initialize();
-		} else {
+		if (!streamline->interposer) {
 			REX::WARN("[FG] Streamline interposer failed to load, will use FSR3 fallback");
 		}
 	}

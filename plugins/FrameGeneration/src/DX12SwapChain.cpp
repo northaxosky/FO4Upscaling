@@ -53,13 +53,9 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 	swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-	auto upscaling = Upscaling::GetSingleton();
-
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
-	} else {
-		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
-	}
+	// Always use FSR3 swap chain for D3D11→D3D12 present pipeline
+	// DLSS-G frame gen runs as an additional step in the Present path
+	CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 
 	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
 	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));

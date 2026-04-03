@@ -139,6 +139,25 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
 				proxy->CreateInterop();
 
+				// Create DLSS-G frame gen feature after swap chain is ready
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto dlssg = StreamlineFG::GetSingleton();
+					// Reset command list for feature creation
+					proxy->commandAllocators[0]->Reset();
+					proxy->commandLists[0]->Reset(proxy->commandAllocators[0].get(), nullptr);
+
+					if (!dlssg->CreateFrameGenFeature(proxy->commandLists[0].get(),
+						proxy->swapChainDesc.Width, proxy->swapChainDesc.Height)) {
+						REX::WARN("[FG] DLSS-G feature creation failed, falling back to FSR3");
+						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+					}
+
+					// Close and execute the command list
+					proxy->commandLists[0]->Close();
+					ID3D12CommandList* cmds[] = { proxy->commandLists[0].get() };
+					proxy->commandQueue->ExecuteCommandLists(1, cmds);
+				}
+
 				*ppSwapChain = proxy->GetSwapChainProxy();
 				
 				return S_OK;

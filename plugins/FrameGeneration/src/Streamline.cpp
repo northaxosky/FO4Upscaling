@@ -6,6 +6,14 @@ bool StreamlineFG::InitNGX(ID3D12Device* a_device)
 
 	REX::INFO("[DLSSG] Initializing NGX for DLSS Frame Generation");
 
+	// Pre-load the DLSS-G runtime so NGX can find it
+	auto dlssgModule = LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\nvngx_dlssg.dll");
+	if (dlssgModule) {
+		REX::INFO("[DLSSG] Pre-loaded nvngx_dlssg.dll");
+	} else {
+		REX::WARN("[DLSSG] Failed to pre-load nvngx_dlssg.dll (error {:#x})", GetLastError());
+	}
+
 	auto result = NVSDK_NGX_D3D12_Init(0x12345678, L".", a_device);
 	REX::INFO("[DLSSG] NGX_D3D12_Init result: {:#x}", (uint32_t)result);
 

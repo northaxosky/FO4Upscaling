@@ -206,15 +206,12 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		if (auto ui = RE::UI::GetSingleton())
 			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !main->inMenuMode && !ui->movementToDirectionalCount;
 
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG && useFrameGenerationThisFrame) {
-		// DLSS-G via NGX direct API
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		// DLSS-G: Streamline handles frame gen in its swap chain interception
 		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->EvaluateFrameGen(
-			commandLists[frameIndex].get(),
-			swapChainBuffers[frameIndex].get(),
-			upscaling->depthBufferShared12[frameIndex].get(),
-			upscaling->motionVectorBufferShared12[frameIndex].get(),
-			upscaling->HUDLessBufferShared12[frameIndex].get());
+		dlssg->Present(useFrameGenerationThisFrame);
+		// Still need FSR3 swap chain for the actual D3D11→D3D12 present pipeline
+		FidelityFX::GetSingleton()->Present(false);
 	} else {
 		// FSR3: Dispatch frame generation via FidelityFX
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);

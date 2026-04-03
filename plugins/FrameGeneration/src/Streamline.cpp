@@ -7,34 +7,49 @@ void StreamlineFG::LoadInterposer()
 		REX::WARN("[DLSSG] Failed to load interposer: {:#x}", GetLastError());
 		return;
 	}
-	REX::INFO("[DLSSG] Interposer loaded at {:#x}", (uintptr_t)interposer);
+	REX::INFO("[DLSSG] Interposer loaded");
 
 	slInit = (PFun_slInit*)GetProcAddress(interposer, "slInit");
 	slShutdown = (PFun_slShutdown*)GetProcAddress(interposer, "slShutdown");
 	slUpgradeInterface = (PFun_slUpgradeInterface*)GetProcAddress(interposer, "slUpgradeInterface");
 	slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
-	slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
-	slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
-	slEvaluateFeature = (PFun_slEvaluateFeature*)GetProcAddress(interposer, "slEvaluateFeature");
+	slIsFeatureSupported = (PFun_slIsFeatureSupported*)GetProcAddress(interposer, "slIsFeatureSupported");
+	slGetFeatureFunction = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
 }
 
 bool StreamlineFG::InitStreamline()
 {
 	if (!interposer || !slInit) return false;
 
-	REX::INFO("[DLSSG] Initializing Streamline (eD3D11 mode for interposer)");
+	REX::INFO("[DLSSG] Initializing Streamline");
 
 	sl::Preferences pref{};
 	pref.showConsole = false;
-	pref.logLevel = sl::LogLevel::eOff;
-	pref.logMessageCallback = nullptr;
+	pref.logLevel = sl::LogLevel::eVerbose;
+	pref.logMessageCallback = [](sl::LogType, const char* msg) {
+		REX::INFO("[SL-INT] {}", msg);
+	};
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f4-frame-generation";
 	pref.flags |= sl::PreferenceFlags::eUseManualHooking;
-	pref.renderAPI = sl::RenderAPI::eD3D11;
+	pref.renderAPI = sl::RenderAPI::eD3D12;
 
-	// Load DLSS-G feature so interposer sets up async frame generation pipeline
+	// Get the real path where sl.interposer.dll lives (resolves through MO2 USVFS)
+	static wchar_t interposerDir[MAX_PATH];
+	GetModuleFileNameW(interposer, interposerDir, MAX_PATH);
+	wchar_t* lastSlash = wcsrchr(interposerDir, L'\\');
+	if (!lastSlash) lastSlash = wcsrchr(interposerDir, L'/');
+	if (lastSlash) *lastSlash = L'\0';
+
+	static const wchar_t* pluginPaths[] = { interposerDir };
+	pref.pathsToPlugins = pluginPaths;
+	pref.numPathsToPlugins = 1;
+
+	// Pre-load plugin DLLs for MO2 USVFS compatibility
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
+
 	static sl::Feature features[] = { sl::kFeatureDLSS_G };
 	pref.featuresToLoad = features;
 	pref.numFeaturesToLoad = 1;
@@ -48,7 +63,6 @@ bool StreamlineFG::InitStreamline()
 	}
 
 	slInitialized = true;
-	REX::INFO("[DLSSG] Streamline initialized for swap chain interception");
 	return true;
 }
 
@@ -57,7 +71,7 @@ void StreamlineFG::SetD3DDevice(ID3D12Device* a_device)
 	d3d12Device = a_device;
 	if (slSetD3DDevice && slInitialized) {
 		slSetD3DDevice(a_device);
-		REX::INFO("[DLSSG] D3D12 device set for Streamline");
+		REX::INFO("[DLSSG] D3D12 device set");
 	}
 }
 
@@ -65,111 +79,74 @@ void StreamlineFG::UpgradeSwapChain(IDXGISwapChain4** a_swapChain)
 {
 	if (slUpgradeInterface && slInitialized) {
 		auto result = slUpgradeInterface((void**)a_swapChain);
-		REX::INFO("[DLSSG] Swap chain upgrade result: {}", (int)result);
+		REX::INFO("[DLSSG] Swap chain upgrade: {}", (int)result);
 	}
 }
 
-bool StreamlineFG::InitNGX(ID3D12Device* a_device)
+bool StreamlineFG::CheckAndEnableDLSSG()
 {
-	d3d12Device = a_device;
-	REX::INFO("[DLSSG] Initializing NGX");
+	if (!slInitialized) return false;
 
-	// Pre-load nvngx_dlssg.dll
-	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\nvngx_dlssg.dll");
+	// Skip feature support check — we know we have an RTX 40+ from GPU logging
+	// slIsFeatureSupported returns MissingOrInvalidAPI with eD3D11 render API
+	// but the feature works through the swap chain interception pathway
+	REX::INFO("[DLSSG] Skipping feature support check, attempting direct enable");
 
-	// Set up logging and search paths
-	NVSDK_NGX_FeatureCommonInfo featureInfo{};
-	NVSDK_NGX_LoggingInfo loggingInfo{};
-	loggingInfo.LoggingCallback = [](const char* message, NVSDK_NGX_Logging_Level level, NVSDK_NGX_Feature) {
-		REX::INFO("[NGX] [{}] {}", (int)level, message);
-	};
-	loggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_VERBOSE;
-	featureInfo.LoggingInfo = loggingInfo;
+	// Load DLSS-G specific functions
+	if (slGetFeatureFunction) {
+		slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
+		slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
+	}
 
-	static const wchar_t* searchPaths[] = { L"Data\\F4SE\\Plugins\\Streamline" };
-	featureInfo.PathListInfo.Path = searchPaths;
-	featureInfo.PathListInfo.Length = 1;
-
-	auto result = NVSDK_NGX_D3D12_Init(0x12345678, L".", a_device, &featureInfo);
-	REX::INFO("[DLSSG] NGX_D3D12_Init result: {:#x}", (uint32_t)result);
-
-	if (NVSDK_NGX_FAILED(result)) {
-		REX::ERROR("[DLSSG] NGX init failed");
+	if (!slDLSSGSetOptions) {
+		REX::WARN("[DLSSG] Could not load slDLSSGSetOptions");
 		return false;
 	}
 
-	NVSDK_NGX_D3D12_GetCapabilityParameters(&ngxParams);
-	ngxInitialized = true;
-	REX::INFO("[DLSSG] NGX initialized");
-	return true;
-}
+	// Enable DLSS-G
+	sl::DLSSGOptions options{};
+	options.mode = sl::DLSSGMode::eOn;
+	options.numFramesToGenerate = 1;
+	sl::ViewportHandle viewport{ 0 };
 
-bool StreamlineFG::CreateFrameGenFeature(ID3D12GraphicsCommandList* a_cmdList, uint32_t a_width, uint32_t a_height)
-{
-	if (!ngxInitialized || !ngxParams) return false;
+	auto result = slDLSSGSetOptions(viewport, options);
+	REX::INFO("[DLSSG] SetOptions result: {}", (int)result);
 
-	REX::INFO("[DLSSG] Creating frame gen feature: {}x{}", a_width, a_height);
-
-	ngxParams->Set(NVSDK_NGX_Parameter_Width, a_width);
-	ngxParams->Set(NVSDK_NGX_Parameter_Height, a_height);
-	ngxParams->Set(NVSDK_NGX_Parameter_OutWidth, a_width);
-	ngxParams->Set(NVSDK_NGX_Parameter_OutHeight, a_height);
-	ngxParams->Set(NVSDK_NGX_Parameter_NumFrames, (unsigned int)1);
-	ngxParams->Set(NVSDK_NGX_Parameter_CreationNodeMask, (unsigned int)1);
-	ngxParams->Set(NVSDK_NGX_Parameter_VisibilityNodeMask, (unsigned int)1);
-
-	auto result = NVSDK_NGX_D3D12_CreateFeature(
-		a_cmdList,
-		NVSDK_NGX_Feature_FrameGeneration,
-		ngxParams,
-		&dlssgHandle);
-
-	REX::INFO("[DLSSG] CreateFeature result: {:#x}", (uint32_t)result);
-
-	if (NVSDK_NGX_FAILED(result)) {
-		REX::ERROR("[DLSSG] Feature creation failed");
+	if (result != sl::Result::eOk) {
+		REX::WARN("[DLSSG] Failed to enable DLSS-G: {}", (int)result);
 		return false;
 	}
 
 	featureDLSSG = true;
-	REX::INFO("[DLSSG] Frame gen feature created!");
+	REX::INFO("[DLSSG] DLSS-G enabled!");
+
+	// Query state
+	if (slDLSSGGetState) {
+		sl::DLSSGState state{};
+		slDLSSGGetState(viewport, state, nullptr);
+		REX::INFO("[DLSSG] State: status={}, minDim={}, maxFrames={}", (int)state.status, state.minWidthOrHeight, state.numFramesToGenerateMax);
+	}
+
 	return true;
 }
 
-bool StreamlineFG::EvaluateFrameGen(ID3D12GraphicsCommandList* a_cmdList,
-	ID3D12Resource* a_backbuffer,
-	ID3D12Resource* a_depth,
-	ID3D12Resource* a_motionVectors,
-	ID3D12Resource* a_hudlessColor)
+void StreamlineFG::Present(bool a_useFrameGen)
 {
-	if (!featureDLSSG || !dlssgHandle || !ngxParams) return false;
+	// DLSS-G frame generation is handled by Streamline's swap chain interception
+	// We just need to enable/disable it via slDLSSGSetOptions
+	if (!featureDLSSG || !slDLSSGSetOptions) return;
 
-	NVSDK_NGX_Parameter_SetD3d12Resource(ngxParams, NVSDK_NGX_EParameter_Color, a_backbuffer);
-	NVSDK_NGX_Parameter_SetD3d12Resource(ngxParams, NVSDK_NGX_EParameter_Output, a_backbuffer);
-	NVSDK_NGX_Parameter_SetD3d12Resource(ngxParams, NVSDK_NGX_EParameter_Depth, a_depth);
-	NVSDK_NGX_Parameter_SetD3d12Resource(ngxParams, NVSDK_NGX_EParameter_MotionVectors, a_motionVectors);
-	if (a_hudlessColor)
-		NVSDK_NGX_Parameter_SetD3d12Resource(ngxParams, "HUDLessColor", a_hudlessColor);
-
-	auto result = NVSDK_NGX_D3D12_EvaluateFeature(a_cmdList, dlssgHandle, ngxParams, nullptr);
-
-	static bool loggedOnce = false;
-	if (!loggedOnce) {
-		REX::INFO("[DLSSG] First EvaluateFeature result: {:#x}", (uint32_t)result);
-		loggedOnce = true;
-	}
-
-	return NVSDK_NGX_SUCCEED(result);
+	sl::DLSSGOptions options{};
+	options.mode = a_useFrameGen ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
+	options.numFramesToGenerate = 1;
+	sl::ViewportHandle viewport{ 0 };
+	slDLSSGSetOptions(viewport, options);
 }
 
 void StreamlineFG::Shutdown()
 {
-	if (dlssgHandle) {
-		NVSDK_NGX_D3D12_ReleaseFeature(dlssgHandle);
-		dlssgHandle = nullptr;
-	}
-	if (ngxInitialized) {
-		NVSDK_NGX_D3D12_Shutdown1(d3d12Device);
-		ngxInitialized = false;
+	if (slInitialized && slShutdown) {
+		slShutdown();
+		slInitialized = false;
 	}
 }

@@ -125,50 +125,28 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				proxy->CreateD3D12Device(adapter);
 
-				// For DLSS-G: init Streamline + NGX before creating command queues/swap chain
+				// For DLSS-G: init Streamline before creating swap chain
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
-
-					// Step 1: Init Streamline (eD3D11 mode for interposer)
 					dlssg->InitStreamline();
-
-					// Step 2: Set D3D12 device for Streamline
 					dlssg->SetD3DDevice(proxy->d3d12Device.get());
-
-					// Step 3: Init NGX for frame gen feature
-					if (!dlssg->InitNGX(proxy->d3d12Device.get())) {
-						REX::WARN("[FG] NGX init failed, falling back to FSR3");
-						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
-					}
 				}
 
 				proxy->CreateD3D12CommandQueues();
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
 
-				// For DLSS-G: upgrade swap chain for Streamline interception
+				// Upgrade swap chain + enable DLSS-G
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
 					dlssg->UpgradeSwapChain(&proxy->swapChain);
+
+					if (!dlssg->CheckAndEnableDLSSG()) {
+						REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");
+						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+					}
 				}
 
 				proxy->CreateInterop();
-
-				// Create DLSS-G frame gen feature after swap chain is ready
-				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-					auto dlssg = StreamlineFG::GetSingleton();
-					proxy->commandAllocators[0]->Reset();
-					proxy->commandLists[0]->Reset(proxy->commandAllocators[0].get(), nullptr);
-
-					if (!dlssg->CreateFrameGenFeature(proxy->commandLists[0].get(),
-						proxy->swapChainDesc.Width, proxy->swapChainDesc.Height)) {
-						REX::WARN("[FG] DLSS-G feature creation failed, falling back to FSR3");
-						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
-					}
-
-					proxy->commandLists[0]->Close();
-					ID3D12CommandList* cmds[] = { proxy->commandLists[0].get() };
-					proxy->commandQueue->ExecuteCommandLists(1, cmds);
-				}
 
 				*ppSwapChain = proxy->GetSwapChainProxy();
 				

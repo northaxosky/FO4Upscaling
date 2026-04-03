@@ -14,7 +14,24 @@ bool StreamlineFG::InitNGX(ID3D12Device* a_device)
 		REX::WARN("[DLSSG] Failed to pre-load nvngx_dlssg.dll (error {:#x})", GetLastError());
 	}
 
-	auto result = NVSDK_NGX_D3D12_Init(0x12345678, L".", a_device);
+	// Set up NGX logging and feature search paths
+	NVSDK_NGX_FeatureCommonInfo featureInfo{};
+
+	// Logging
+	NVSDK_NGX_LoggingInfo loggingInfo{};
+	loggingInfo.LoggingCallback = [](const char* message, NVSDK_NGX_Logging_Level level, NVSDK_NGX_Feature) {
+		REX::INFO("[NGX] [{}] {}", (int)level, message);
+	};
+	loggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_VERBOSE;
+	loggingInfo.DisableOtherLoggingSinks = false;
+	featureInfo.LoggingInfo = loggingInfo;
+
+	// Tell NGX where to find nvngx_dlssg.dll and other feature DLLs
+	static const wchar_t* searchPaths[] = { L"Data\\F4SE\\Plugins\\Streamline" };
+	featureInfo.PathListInfo.Path = searchPaths;
+	featureInfo.PathListInfo.Length = 1;
+
+	auto result = NVSDK_NGX_D3D12_Init(0x12345678, L".", a_device, &featureInfo);
 	REX::INFO("[DLSSG] NGX_D3D12_Init result: {:#x}", (uint32_t)result);
 
 	if (NVSDK_NGX_FAILED(result)) {

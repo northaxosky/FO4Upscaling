@@ -12,7 +12,11 @@ extern bool enbLoaded;
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
+	REX::INFO("[FG] D3D12 device created");
+}
 
+void DX12SwapChain::CreateD3D12CommandQueues()
+{
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
@@ -26,6 +30,7 @@ void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
 		commandLists[i]->Close();
 	}
+	REX::INFO("[FG] D3D12 command queues created");
 }
 
 void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)

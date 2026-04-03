@@ -135,10 +135,28 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				proxy->CreateD3D12Device(adapter);
 
-				// Set D3D12 device and check DLSS-G support
+				// For DLSS-G: upgrade D3D12 device BEFORE creating command queues
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto streamline = StreamlineFG::GetSingleton();
+
+					// Upgrade device to Streamline proxy — intercepts CreateCommandQueue
+					if (streamline->slUpgradeInterface) {
+						ID3D12Device* rawDevice = proxy->d3d12Device.get();
+						auto upgradeResult = streamline->slUpgradeInterface((void**)&rawDevice);
+						REX::INFO("[DLSSG] Device upgrade result: {}", (int)upgradeResult);
+						// rawDevice is now a proxy; update the stored device
+						proxy->d3d12Device.copy_from(rawDevice);
+					}
+
 					streamline->SetD3DDevice(proxy->d3d12Device.get());
+				}
+
+				// Create command queues (Streamline intercepts CreateCommandQueue if DLSS-G)
+				proxy->CreateD3D12CommandQueues();
+
+				// Check DLSS-G support after device + queues are set up
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto streamline = StreamlineFG::GetSingleton();
 					streamline->CheckFeatures(adapter);
 					streamline->PostDevice();
 					if (!streamline->featureDLSSG) {

@@ -67,7 +67,8 @@ void StreamlineFG::Initialize()
 	pref.projectId = "f4-frame-generation";
 	pref.flags |= sl::PreferenceFlags::eUseManualHooking;
 
-	pref.renderAPI = sl::RenderAPI::eD3D11;
+	// DLSS-G requires D3D12 render API — D3D11 causes FeatureNotSupported
+	pref.renderAPI = sl::RenderAPI::eD3D12;
 
 	// Pre-load Streamline plugin DLLs so they're in memory when slInit searches
 	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
@@ -79,7 +80,7 @@ void StreamlineFG::Initialize()
 	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\nvngx_dlss.dll");
 	REX::INFO("[DLSSG] Pre-loaded Streamline plugin DLLs");
 
-	REX::INFO("[DLSSG] Calling slInit with renderAPI=eD3D11, {} features", pref.numFeaturesToLoad);
+	REX::INFO("[DLSSG] Calling slInit with renderAPI=eD3D12, {} features", pref.numFeaturesToLoad);
 
 	auto initResult = slInit(pref, sl::kSDKVersion);
 	REX::INFO("[DLSSG] slInit returned: {}", (int)initResult);

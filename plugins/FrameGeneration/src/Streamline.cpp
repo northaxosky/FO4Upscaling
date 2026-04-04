@@ -16,6 +16,7 @@ void StreamlineFG::LoadInterposer()
 	slIsFeatureSupported = (PFun_slIsFeatureSupported*)GetProcAddress(interposer, "slIsFeatureSupported");
 	slGetFeatureFunction = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
 	slSetTag = (PFun_slSetTag2*)GetProcAddress(interposer, "slSetTag");
+	slSetTagForFrame = (PFun_slSetTagForFrame2*)GetProcAddress(interposer, "slSetTagForFrame");
 	slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
 	slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
 	slEvaluateFeature = (PFun_slEvaluateFeature*)GetProcAddress(interposer, "slEvaluateFeature");
@@ -40,7 +41,7 @@ bool StreamlineFG::InitStreamline()
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4";
-	pref.flags = sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseManualHooking;
+	pref.flags = sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseManualHooking | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 	pref.renderAPI = sl::RenderAPI::eD3D12;
 
 	// Get the real path where sl.interposer.dll lives
@@ -222,8 +223,8 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		}
 	}
 
-	// 3. Tag D3D12 resources
-	if (slSetTag && a_depth && a_motionVectors && a_hudlessColor) {
+	// 3. Tag D3D12 resources (frame-based tagging API)
+	if (frameToken && a_depth && a_motionVectors && a_hudlessColor && (slSetTagForFrame || slSetTag)) {
 		sl::Resource depth = { sl::ResourceType::eTex2d, a_depth, 0 };
 		sl::Resource mvec = { sl::ResourceType::eTex2d, a_motionVectors, 0 };
 		sl::Resource hudless = { sl::ResourceType::eTex2d, a_hudlessColor, 0 };
@@ -233,7 +234,10 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		sl::ResourceTag hudlessTag = { &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
 
 		sl::ResourceTag tags[] = { depthTag, mvecTag, hudlessTag };
-		slSetTag(viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
+		if (slSetTagForFrame)
+			slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
+		else
+			slSetTag(viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
 
 		static bool loggedOnce = false;
 		if (!loggedOnce) {

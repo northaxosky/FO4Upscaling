@@ -131,20 +131,16 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				}
 
 				proxy->CreateD3D12Device(adapter);
-
-				// Set D3D12 device for Streamline IMMEDIATELY after creation
-				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-					auto dlssg = StreamlineFG::GetSingleton();
-					dlssg->SetD3DDevice(proxy->d3d12Device.get());
-				}
-
 				proxy->CreateD3D12CommandQueues();
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
 
-				// Upgrade swap chain + enable DLSS-G
+				// DLSS-G: upgrade swap chain BEFORE slSetD3DDevice
+				// slSetD3DDevice triggers plugin init which processes Present hooks
+				// The swap chain must exist at that point for hooks to register
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
 					dlssg->UpgradeSwapChain(&proxy->swapChain);
+					dlssg->SetD3DDevice(proxy->d3d12Device.get());
 
 					if (!dlssg->CheckAndEnableDLSSG()) {
 						REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");

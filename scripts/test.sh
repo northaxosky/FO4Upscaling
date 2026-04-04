@@ -56,7 +56,7 @@ MENU_WAIT=$SECONDS
 while (( SECONDS - MENU_WAIT < 60 )); do
     if [ -f "$UPSCALING_LOG" ] && grep -q "Data loaded" "$UPSCALING_LOG" 2>/dev/null; then
         echo "Data loaded, waiting for save auto-load..."
-        sleep 45
+        sleep 30
         # Focus game window for screenshot
         powershell.exe -Command '
             Add-Type @"

@@ -14,6 +14,7 @@
 #pragma warning(pop)
 
 using PFun_slSetTag2 = sl::Result(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
+using PFun_slSetTagForFrame2 = sl::Result(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
 
 class StreamlineFG
 {
@@ -69,6 +70,7 @@ public:
 	PFun_slIsFeatureSupported* slIsFeatureSupported{};
 	PFun_slGetFeatureFunction* slGetFeatureFunction{};
 	PFun_slSetTag2* slSetTag{};
+	PFun_slSetTagForFrame2* slSetTagForFrame{};
 	PFun_slSetConstants* slSetConstants{};
 	PFun_slGetNewFrameToken* slGetNewFrameToken{};
 	PFun_slEvaluateFeature* slEvaluateFeature{};

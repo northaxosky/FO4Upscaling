@@ -130,6 +130,25 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	return true;
 }
 
+// Convert game's __m128[4] row-major matrix to Streamline's float4x4
+static sl::float4x4 toSLMatrix(const __m128* mat)
+{
+	sl::float4x4 result;
+	for (int i = 0; i < 4; i++) {
+		alignas(16) float row[4];
+		_mm_store_ps(row, mat[i]);
+		result[i] = sl::float4(row[0], row[1], row[2], row[3]);
+	}
+	return result;
+}
+
+static sl::float3 toSLFloat3(const __m128* v)
+{
+	alignas(16) float vals[4];
+	_mm_store_ps(vals, *v);
+	return sl::float3(vals[0], vals[1], vals[2]);
+}
+
 void StreamlineFG::Present(bool a_useFrameGen,
 	ID3D12GraphicsCommandList* a_cmdList,
 	ID3D12Resource* a_depth,
@@ -137,7 +156,8 @@ void StreamlineFG::Present(bool a_useFrameGen,
 	ID3D12Resource* a_hudlessColor,
 	float2 a_screenSize, float2 a_renderSize,
 	float2 a_jitter,
-	float a_cameraNear, float a_cameraFar)
+	float a_cameraNear, float a_cameraFar,
+	const CameraData& a_camera)
 {
 	if (!featureDLSSG) return;
 
@@ -150,9 +170,29 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		}
 	}
 
-	// 2. Set per-frame constants
+	// 2. Set per-frame constants with full camera matrices
 	if (slSetConstants && frameToken) {
 		sl::Constants constants{};
+
+		// Camera matrices (row major, unjittered as required by Streamline)
+		constants.cameraViewToClip = toSLMatrix(a_camera.projMat);
+		sl::matrixFullInvert(constants.clipToCameraView, constants.cameraViewToClip);
+
+		// clipToPrevClip = inverse(currentVP) * previousVP
+		sl::float4x4 currentVP = toSLMatrix(a_camera.currentViewProjUnjittered);
+		sl::float4x4 previousVP = toSLMatrix(a_camera.previousViewProjUnjittered);
+		sl::float4x4 invCurrentVP;
+		sl::matrixFullInvert(invCurrentVP, currentVP);
+		sl::matrixMul(constants.clipToPrevClip, invCurrentVP, previousVP);
+		sl::matrixFullInvert(constants.prevClipToClip, constants.clipToPrevClip);
+
+		// Camera vectors
+		constants.cameraPos = sl::float3(a_camera.posX, a_camera.posY, a_camera.posZ);
+		constants.cameraUp = toSLFloat3(a_camera.viewUp);
+		constants.cameraRight = toSLFloat3(a_camera.viewRight);
+		constants.cameraFwd = toSLFloat3(a_camera.viewDir);
+
+		// Scalar camera data
 		constants.cameraNear = a_cameraNear;
 		constants.cameraFar = a_cameraFar;
 		constants.cameraAspectRatio = a_screenSize.x / a_screenSize.y;
@@ -172,6 +212,13 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		if (SL_FAILED(res, slSetConstants(constants, *frameToken, viewport))) {
 			static bool loggedOnce = false;
 			if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to set constants"); loggedOnce = true; }
+		}
+
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::INFO("[DLSSG] First constants with camera matrices: pos=({},{},{}), near={}, far={}",
+				a_camera.posX, a_camera.posY, a_camera.posZ, a_cameraNear, a_cameraFar);
+			loggedOnce = true;
 		}
 	}
 
@@ -204,19 +251,7 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		slDLSSGSetOptions(viewport, options);
 	}
 
-	// 5. Evaluate DLSS-G feature to dispatch frame generation
-	if (slEvaluateFeature && a_useFrameGen && frameToken) {
-		sl::ViewportHandle view(viewport);
-		const sl::BaseStructure* inputs[] = { &view };
-		auto result = slEvaluateFeature(sl::kFeatureDLSS_G, *frameToken, inputs, _countof(inputs),
-			(sl::CommandBuffer*)a_cmdList);
-
-		static bool loggedOnce = false;
-		if (!loggedOnce) {
-			REX::INFO("[DLSSG] First slEvaluateFeature result: {}", (int)result);
-			loggedOnce = true;
-		}
-	}
+	// DLSS-G generates frames via swap chain Present interception — no slEvaluateFeature needed
 }
 
 void StreamlineFG::Shutdown()

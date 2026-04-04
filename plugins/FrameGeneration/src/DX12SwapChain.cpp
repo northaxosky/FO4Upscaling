@@ -241,13 +241,28 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		float cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
 		float cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
+		// Extract camera matrices from game state
+		auto& camView = gameViewport->cameraState.camViewData;
+		auto& camState = gameViewport->cameraState;
+
+		StreamlineFG::CameraData camera;
+		camera.projMat = camView.projMat;
+		camera.currentViewProjUnjittered = camView.currentViewProjUnjittered;
+		camera.previousViewProjUnjittered = camView.previousViewProjUnjittered;
+		camera.viewUp = &camView.viewUp;
+		camera.viewRight = &camView.viewRight;
+		camera.viewDir = &camView.viewDir;
+		camera.posX = camState.posAdjust.x;
+		camera.posY = camState.posAdjust.y;
+		camera.posZ = camState.posAdjust.z;
+
 		dlssg->Present(useFrameGenerationThisFrame,
 			commandLists[frameIndex].get(),
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get(),
 			screenSize, renderSize, jitter,
-			cameraNear, cameraFar);
+			cameraNear, cameraFar, camera);
 
 		// Don't call FidelityFX::Present — let Streamline handle the swap chain directly
 	} else {

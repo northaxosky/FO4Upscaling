@@ -9,6 +9,7 @@
 #include <sl.h>
 #include <sl_consts.h>
 #include <sl_dlss_g.h>
+#include <sl_matrix_helpers.h>
 #include <sl_version.h>
 #pragma warning(pop)
 
@@ -29,6 +30,18 @@ public:
 	void UpgradeSwapChain(IDXGISwapChain4** a_swapChain);
 	bool CheckAndEnableDLSSG();
 
+	// Camera matrices as __m128[4] from BSGraphics::State::ViewData
+	struct CameraData
+	{
+		const __m128* projMat;                     // view → clip (unjittered)
+		const __m128* currentViewProjUnjittered;   // current VP (unjittered)
+		const __m128* previousViewProjUnjittered;  // previous VP (unjittered)
+		const __m128* viewUp;
+		const __m128* viewRight;
+		const __m128* viewDir;
+		float posX, posY, posZ;                    // camera position
+	};
+
 	void Present(bool a_useFrameGen,
 		ID3D12GraphicsCommandList* a_cmdList,
 		ID3D12Resource* a_depth,
@@ -36,7 +49,8 @@ public:
 		ID3D12Resource* a_hudlessColor,
 		float2 a_screenSize, float2 a_renderSize,
 		float2 a_jitter,
-		float a_cameraNear, float a_cameraFar);
+		float a_cameraNear, float a_cameraFar,
+		const CameraData& a_camera);
 
 	void Shutdown();
 

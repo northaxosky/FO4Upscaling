@@ -41,7 +41,7 @@ bool StreamlineFG::InitStreamline()
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4";
-	pref.flags = sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseManualHooking | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
+	pref.flags = sl::PreferenceFlags::eUseManualHooking | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 	pref.renderAPI = sl::RenderAPI::eD3D12;
 
 	// Get the real path where sl.interposer.dll lives
@@ -71,6 +71,22 @@ bool StreamlineFG::InitStreamline()
 	return true;
 }
 
+void StreamlineFG::UpgradeDevice(ID3D12Device** a_device)
+{
+	if (slUpgradeInterface && slInitialized) {
+		auto result = slUpgradeInterface((void**)a_device);
+		REX::INFO("[DLSSG] D3D12 device upgrade: {}", (int)result);
+	}
+}
+
+void StreamlineFG::UpgradeFactory(IDXGIFactory** a_factory)
+{
+	if (slUpgradeInterface && slInitialized) {
+		auto result = slUpgradeInterface((void**)a_factory);
+		REX::INFO("[DLSSG] DXGI factory upgrade: {}", (int)result);
+	}
+}
+
 void StreamlineFG::SetD3DDevice(ID3D12Device* a_device)
 {
 	d3d12Device = a_device;
@@ -98,6 +114,16 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		auto r2 = slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
 		REX::INFO("[DLSSG] slDLSSGSetOptions load: {} (ptr={:#x})", (int)r1, (uintptr_t)slDLSSGSetOptions);
 		REX::INFO("[DLSSG] slDLSSGGetState load: {} (ptr={:#x})", (int)r2, (uintptr_t)slDLSSGGetState);
+
+		// Load Reflex/PCL functions — required by DLSS-G
+		auto r3 = slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetOptions", (void*&)slReflexSetOptions);
+		auto r4 = slGetFeatureFunction(sl::kFeatureReflex, "slReflexSleep", (void*&)slReflexSleep);
+		auto r5 = slGetFeatureFunction(sl::kFeaturePCL, "slPCLSetMarker", (void*&)slPCLSetMarker);
+		auto r6 = slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetMarker", (void*&)slReflexSetMarker);
+		REX::INFO("[DLSSG] slReflexSetOptions load: {} (ptr={:#x})", (int)r3, (uintptr_t)slReflexSetOptions);
+		REX::INFO("[DLSSG] slReflexSleep load: {} (ptr={:#x})", (int)r4, (uintptr_t)slReflexSleep);
+		REX::INFO("[DLSSG] slPCLSetMarker load: {} (ptr={:#x})", (int)r5, (uintptr_t)slPCLSetMarker);
+		REX::INFO("[DLSSG] slReflexSetMarker load: {} (ptr={:#x})", (int)r6, (uintptr_t)slReflexSetMarker);
 	}
 
 	if (!slDLSSGSetOptions) {
@@ -105,10 +131,13 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		return false;
 	}
 
-	// Enable DLSS-G
+	// Enable DLSS-G (set once at init, not per-frame per DLSS-G docs)
 	sl::DLSSGOptions options{};
 	options.mode = sl::DLSSGMode::eOn;
 	options.numFramesToGenerate = 1;
+	options.colorBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	options.hudLessBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	options.depthBufferFormat = DXGI_FORMAT_R32_FLOAT;
 
 	auto result = slDLSSGSetOptions(viewport, options);
 	REX::INFO("[DLSSG] SetOptions result: {}", (int)result);
@@ -120,6 +149,14 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 
 	featureDLSSG = true;
 	REX::INFO("[DLSSG] DLSS-G enabled!");
+
+	// Reflex options must be set at least once (even if mode is Off)
+	if (slReflexSetOptions) {
+		sl::ReflexOptions reflexOptions{};
+		reflexOptions.mode = sl::ReflexMode::eLowLatency;
+		auto reflexResult = slReflexSetOptions(reflexOptions);
+		REX::INFO("[DLSSG] ReflexSetOptions result: {}", (int)reflexResult);
+	}
 
 	if (slDLSSGGetState) {
 		sl::DLSSGState state{};
@@ -150,6 +187,36 @@ static sl::float3 toSLFloat3(const __m128* v)
 	return sl::float3(vals[0], vals[1], vals[2]);
 }
 
+void StreamlineFG::AcquireFrameToken()
+{
+	if (!slGetNewFrameToken || !featureDLSSG) return;
+
+	if (SL_FAILED(res, slGetNewFrameToken(frameToken, nullptr))) {
+		static bool loggedOnce = false;
+		if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to get frame token"); loggedOnce = true; }
+	}
+}
+
+void StreamlineFG::SetPCLMarker(sl::PCLMarker marker)
+{
+	if (!frameToken) return;
+
+	if (slReflexSetMarker) {
+		auto result = slReflexSetMarker(marker, *frameToken);
+
+		// Log ePresentStart — every frame for first 200, then every 300th
+		if (marker == sl::PCLMarker::ePresentStart) {
+			static int presentCount = 0;
+			presentCount++;
+			if (presentCount <= 200 || presentCount % 300 == 0) {
+				REX::INFO("[DLSSG] ePresentStart #{}: result={}, token={}", presentCount, (int)result, (uint64_t)*frameToken);
+			}
+		}
+	} else if (slPCLSetMarker) {
+		slPCLSetMarker(marker, *frameToken);
+	}
+}
+
 void StreamlineFG::Present(bool a_useFrameGen,
 	ID3D12GraphicsCommandList* a_cmdList,
 	ID3D12Resource* a_depth,
@@ -160,26 +227,22 @@ void StreamlineFG::Present(bool a_useFrameGen,
 	float a_cameraNear, float a_cameraFar,
 	const CameraData& a_camera)
 {
-	if (!featureDLSSG) return;
+	if (!featureDLSSG || !frameToken) return;
+	(void)a_useFrameGen;
 
-	// 1. Get frame token
-	if (slGetNewFrameToken) {
-		if (SL_FAILED(res, slGetNewFrameToken(frameToken, nullptr))) {
-			static bool loggedOnce = false;
-			if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to get frame token"); loggedOnce = true; }
-			return;
-		}
-	}
-
-	// 2. Set per-frame constants with full camera matrices
+	// 1. Set per-frame constants with camera matrices
 	if (slSetConstants && frameToken) {
 		sl::Constants constants{};
 
-		// Camera matrices (row major, unjittered as required by Streamline)
-		constants.cameraViewToClip = toSLMatrix(a_camera.projMat);
+		// Camera matrices — MUST be unjittered per DLSS-G docs
+		// projMat may be jittered, so derive unjittered projection: inv(view) * viewProjUnjittered
+		sl::float4x4 viewMatrix = toSLMatrix(a_camera.viewMat);
+		sl::float4x4 invView;
+		sl::matrixFullInvert(invView, viewMatrix);
+		sl::float4x4 vpUnjittered = toSLMatrix(a_camera.viewProjUnjittered);
+		sl::matrixMul(constants.cameraViewToClip, invView, vpUnjittered);
 		sl::matrixFullInvert(constants.clipToCameraView, constants.cameraViewToClip);
 
-		// clipToPrevClip = inverse(currentVP) * previousVP
 		sl::float4x4 currentVP = toSLMatrix(a_camera.currentViewProjUnjittered);
 		sl::float4x4 previousVP = toSLMatrix(a_camera.previousViewProjUnjittered);
 		sl::float4x4 invCurrentVP;
@@ -187,22 +250,20 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		sl::matrixMul(constants.clipToPrevClip, invCurrentVP, previousVP);
 		sl::matrixFullInvert(constants.prevClipToClip, constants.clipToPrevClip);
 
-		// Camera vectors
 		constants.cameraPos = sl::float3(a_camera.posX, a_camera.posY, a_camera.posZ);
 		constants.cameraUp = toSLFloat3(a_camera.viewUp);
 		constants.cameraRight = toSLFloat3(a_camera.viewRight);
 		constants.cameraFwd = toSLFloat3(a_camera.viewDir);
-
-		// Scalar camera data
 		constants.cameraNear = a_cameraNear;
 		constants.cameraFar = a_cameraFar;
 		constants.cameraAspectRatio = a_screenSize.x / a_screenSize.y;
 		constants.cameraFOV = 0.0f;
 		constants.cameraMotionIncluded = sl::Boolean::eTrue;
 		constants.cameraPinholeOffset = { 0.f, 0.f };
-		constants.depthInverted = sl::Boolean::eFalse;
+		constants.depthInverted = sl::Boolean::eTrue;
 		constants.jitterOffset = { -a_jitter.x, -a_jitter.y };
-		constants.mvecScale = { a_renderSize.x, a_renderSize.y };
+		(void)a_renderSize;
+		constants.mvecScale = { 1.0f, 1.0f };
 		constants.reset = sl::Boolean::eFalse;
 		constants.motionVectors3D = sl::Boolean::eFalse;
 		constants.motionVectorsInvalidValue = FLT_MIN;
@@ -223,8 +284,8 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		}
 	}
 
-	// 3. Tag D3D12 resources (frame-based tagging API)
-	if (frameToken && a_depth && a_motionVectors && a_hudlessColor && (slSetTagForFrame || slSetTag)) {
+	// 3. Tag D3D12 resources (frame-based tagging)
+	if (frameToken && a_depth && a_motionVectors && a_hudlessColor && slSetTagForFrame) {
 		sl::Resource depth = { sl::ResourceType::eTex2d, a_depth, 0 };
 		sl::Resource mvec = { sl::ResourceType::eTex2d, a_motionVectors, 0 };
 		sl::Resource hudless = { sl::ResourceType::eTex2d, a_hudlessColor, 0 };
@@ -233,11 +294,11 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		sl::ResourceTag mvecTag = { &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
 		sl::ResourceTag hudlessTag = { &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
 
-		sl::ResourceTag tags[] = { depthTag, mvecTag, hudlessTag };
-		if (slSetTagForFrame)
-			slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
-		else
-			slSetTag(viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
+		// Tag null UI overlay — tells DLSS-G there's no separate UI layer
+		sl::ResourceTag uiTag = { nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
+
+		sl::ResourceTag tags[] = { depthTag, mvecTag, hudlessTag, uiTag };
+		slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
 
 		static bool loggedOnce = false;
 		if (!loggedOnce) {
@@ -247,15 +308,32 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		}
 	}
 
-	// 4. Toggle DLSS-G mode
-	if (slDLSSGSetOptions) {
-		sl::DLSSGOptions options{};
-		options.mode = a_useFrameGen ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-		options.numFramesToGenerate = 1;
-		slDLSSGSetOptions(viewport, options);
-	}
+	// slDLSSGSetOptions is called once at init (CheckAndEnableDLSSG), not per-frame
 
-	// DLSS-G generates frames via swap chain Present interception — no slEvaluateFeature needed
+	// 5. Periodic DLSS-G state diagnostics — decode ALL status flags
+	if (slDLSSGGetState) {
+		static int stateCheckCount = 0;
+		stateCheckCount++;
+		if (stateCheckCount <= 10 || stateCheckCount % 100 == 0) {
+			sl::DLSSGState state{};
+			slDLSSGGetState(viewport, state, nullptr);
+
+			// Decode status bitmask
+			auto s = (uint32_t)state.status;
+			if (s == 0) {
+				REX::INFO("[DLSSG] State #{}: OK, numFGMax={}", stateCheckCount, state.numFramesToGenerateMax);
+			} else {
+				std::string flags;
+				if (s & 1) flags += "ResolutionTooLow|";
+				if (s & 2) flags += "ReflexNotDetected|";
+				if (s & 4) flags += "HDRFormatNotSupported|";
+				if (s & 8) flags += "ConstantsInvalid|";
+				if (s & 16) flags += "GetCurrentBackBufferIndexNotCalled|";
+				if (!flags.empty()) flags.pop_back(); // remove trailing |
+				REX::WARN("[DLSSG] State #{}: INVALID status=0x{:x} [{}]", stateCheckCount, s, flags);
+			}
+		}
+	}
 }
 
 void StreamlineFG::Shutdown()

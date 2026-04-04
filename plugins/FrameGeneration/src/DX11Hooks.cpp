@@ -131,16 +131,27 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				}
 
 				proxy->CreateD3D12Device(adapter);
+
+				// DLSS-G: upgrade device+factory, set device, THEN create queues/swapchain
+				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto dlssg = StreamlineFG::GetSingleton();
+					ID3D12Device* rawDevice = proxy->d3d12Device.get();
+					dlssg->UpgradeDevice(&rawDevice);
+					proxy->d3d12Device.copy_from(rawDevice);
+
+					IDXGIFactory* rawFactory = (IDXGIFactory*)dxgiFactory;
+					dlssg->UpgradeFactory(&rawFactory);
+					dxgiFactory = (IDXGIFactory4*)rawFactory;
+
+					dlssg->SetD3DDevice(proxy->d3d12Device.get());
+				}
+
 				proxy->CreateD3D12CommandQueues();
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
 
-				// DLSS-G: upgrade swap chain BEFORE slSetD3DDevice
-				// slSetD3DDevice triggers plugin init which processes Present hooks
-				// The swap chain must exist at that point for hooks to register
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
-					dlssg->UpgradeSwapChain(&proxy->swapChain);
-					dlssg->SetD3DDevice(proxy->d3d12Device.get());
 
 					if (!dlssg->CheckAndEnableDLSSG()) {
 						REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");

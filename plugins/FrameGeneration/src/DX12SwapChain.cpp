@@ -52,6 +52,7 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 	swapChainDesc.Width = a_swapChainDesc.BufferDesc.Width;
 	swapChainDesc.Height = a_swapChainDesc.BufferDesc.Height;
 	swapChainDesc.Format = a_swapChainDesc.BufferDesc.Format;
+	REX::INFO("[FG] Swap chain format: game={} (RGBA8=28, BGRA8=87)", (uint32_t)swapChainDesc.Format);
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	swapChainDesc.SampleDesc.Count = 1;
@@ -68,7 +69,8 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 	auto upscaling = Upscaling::GetSingleton();
 
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		// DLSS-G needs a plain swap chain — FFX wrapping interferes with Streamline interception
+		// Revert to game's native format — BGRA didn't fix the pink tint
+		// DLSS-G's internal buffers match whatever format we use here
 		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
 	} else {
 		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
@@ -144,6 +146,7 @@ void DX12SwapChain::CreateInterop()
 	texDesc11.CPUAccessFlags = 0;
 	texDesc11.MiscFlags = 0;
 
+	// Create interop textures
 	if (enbLoaded)
 		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 	else
@@ -194,39 +197,42 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	DX::ThrowIfFailed(commandAllocators[frameIndex]->Reset());
 	DX::ThrowIfFailed(commandLists[frameIndex]->Reset(commandAllocators[frameIndex].get(), nullptr));
 
-	// Copy shared texture to swap chain buffer
+	// Transfer frame to swap chain buffer
 	{
-		auto fakeSwapChain = swapChainBufferWrapped[frameIndex]->resource.get();
-		auto realSwapChain = swapChainBuffers[frameIndex].get();
-		{
-			std::vector<D3D12_RESOURCE_BARRIER> barriers;
-			barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(fakeSwapChain, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE));
-			barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(realSwapChain, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST));
-			commandLists[frameIndex]->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-		}
+		auto srcResource = swapChainBufferWrapped[frameIndex]->resource.get();
+		auto dstResource = swapChainBuffers[frameIndex].get();
 
-		commandLists[frameIndex]->CopyResource(realSwapChain, fakeSwapChain);
+		D3D12_RESOURCE_BARRIER barriers[2] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(srcResource, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
+			CD3DX12_RESOURCE_BARRIER::Transition(dstResource, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
+		};
+		commandLists[frameIndex]->ResourceBarrier(2, barriers);
 
-		{
-			std::vector<D3D12_RESOURCE_BARRIER> barriers;
-			barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(fakeSwapChain, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON));
-			barriers.push_back(CD3DX12_RESOURCE_BARRIER::Transition(realSwapChain, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT));
-			commandLists[frameIndex]->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.data());
-		}
+		commandLists[frameIndex]->CopyResource(dstResource, srcResource);
+
+		D3D12_RESOURCE_BARRIER postBarriers[2] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(srcResource, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
+			CD3DX12_RESOURCE_BARRIER::Transition(dstResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT)
+		};
+		commandLists[frameIndex]->ResourceBarrier(2, postBarriers);
 	}
 
 	auto upscaling = Upscaling::GetSingleton();
 
 	bool useFrameGenerationThisFrame = false;
-	
+	bool isDLSSGFrame = false;
+
 	if (auto main = RE::Main::GetSingleton())
 		if (auto ui = RE::UI::GetSingleton())
 			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !main->inMenuMode && !ui->movementToDirectionalCount;
 
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		// DLSS-G: tag resources and set constants before FSR3 swap chain presents
 		auto dlssg = StreamlineFG::GetSingleton();
 
+		// Acquire frame token first
+		dlssg->AcquireFrameToken();
+
+		// Set constants and tag resources BEFORE markers (Reflex needs constants present)
 		static auto gameViewport = State_GetSingleton();
 		static auto renderTargetManager = RenderTargetManager_GetSingleton();
 
@@ -241,12 +247,13 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		float cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
 		float cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
-		// Extract camera matrices from game state
 		auto& camView = gameViewport->cameraState.camViewData;
 		auto& camState = gameViewport->cameraState;
 
 		StreamlineFG::CameraData camera;
+		camera.viewMat = camView.viewMat;
 		camera.projMat = camView.projMat;
+		camera.viewProjUnjittered = camView.viewProjUnjittered;
 		camera.currentViewProjUnjittered = camView.currentViewProjUnjittered;
 		camera.previousViewProjUnjittered = camView.previousViewProjUnjittered;
 		camera.viewUp = &camView.viewUp;
@@ -264,7 +271,14 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			screenSize, renderSize, jitter,
 			cameraNear, cameraFar, camera);
 
-		// Don't call FidelityFX::Present — let Streamline handle the swap chain directly
+		// Reflex markers AFTER constants are set
+		if (dlssg->slReflexSleep && dlssg->frameToken)
+			dlssg->slReflexSleep(*dlssg->frameToken);
+
+		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationStart);
+		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationEnd);
+
+		isDLSSGFrame = true;
 	} else {
 		// FSR3: Dispatch frame generation via FidelityFX
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
@@ -272,15 +286,37 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 
+	// Reflex: render submit markers bracket GPU work submission
+	if (isDLSSGFrame) {
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
+	}
+
 	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
 	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
+
+	if (isDLSSGFrame) {
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
+	}
 
 	// Fix FPS cap being e.g. 55 instead of 60
 	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
+	// Reflex: present markers bracket the swap chain Present — DLSS-G uses these to trigger frame gen
+	if (isDLSSGFrame) {
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->SetPCLMarker(sl::PCLMarker::ePresentStart);
+	}
+
 	// Present the frame
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
+
+	if (isDLSSGFrame) {
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->SetPCLMarker(sl::PCLMarker::ePresentEnd);
+	}
 
 	// Wait for previous frame to have finished
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();

@@ -57,33 +57,6 @@ while (( SECONDS - MENU_WAIT < 60 )); do
     if [ -f "$UPSCALING_LOG" ] && grep -q "Data loaded" "$UPSCALING_LOG" 2>/dev/null; then
         echo "Data loaded, waiting for save auto-load..."
         sleep 30
-        # Focus game window for screenshot
-        powershell.exe -Command '
-            Add-Type @"
-                using System;
-                using System.Runtime.InteropServices;
-                public class FocusHelper {
-                    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
-                    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-                    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-                    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
-                    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-                    public static void Focus(IntPtr hwnd) {
-                        uint pid;
-                        uint targetThread = GetWindowThreadProcessId(hwnd, out pid);
-                        uint currentThread = GetCurrentThreadId();
-                        AttachThreadInput(currentThread, targetThread, true);
-                        ShowWindow(hwnd, 9);
-                        SetForegroundWindow(hwnd);
-                        AttachThreadInput(currentThread, targetThread, false);
-                    }
-                }
-"@
-            $proc = Get-Process -Name "Fallout4" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
-                [FocusHelper]::Focus($proc.MainWindowHandle)
-            }
-        ' 2>/dev/null || true
         sleep 2
         echo "Save should be loaded"
         break

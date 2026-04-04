@@ -131,21 +131,10 @@ mkdir -p "$RESULTS_DIR"
 cp "$UPSCALING_LOG" "$RESULTS_DIR/" 2>/dev/null || true
 cp "$FG_LOG" "$RESULTS_DIR/" 2>/dev/null || true
 
-# Take screenshot if game is still running
+# Take screenshot if game is still running (DXGI desktop duplication via dxcam)
 if $SUCCESS && tasklist.exe 2>/dev/null | grep -qi "Fallout4"; then
     SCREENSHOT_FILE="$RESULTS_DIR/screenshot.png"
-    SCREENSHOT_WIN=$(cygpath -w "$SCREENSHOT_FILE")
-    powershell.exe -Command "
-        Add-Type -AssemblyName System.Windows.Forms
-        Add-Type -AssemblyName System.Drawing
-        \$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-        \$bmp = New-Object System.Drawing.Bitmap(\$screen.Width, \$screen.Height)
-        \$gfx = [System.Drawing.Graphics]::FromImage(\$bmp)
-        \$gfx.CopyFromScreen(\$screen.Location, [System.Drawing.Point]::Empty, \$screen.Size)
-        \$bmp.Save('$SCREENSHOT_WIN', [System.Drawing.Imaging.ImageFormat]::Png)
-        \$gfx.Dispose()
-        \$bmp.Dispose()
-    " 2>/dev/null && echo "Screenshot captured" || echo "Screenshot failed"
+    python "$SCRIPT_DIR/screenshot.py" "$SCREENSHOT_FILE" 2>/dev/null && echo "Screenshot captured" || echo "Screenshot failed"
 fi
 
 # Summary

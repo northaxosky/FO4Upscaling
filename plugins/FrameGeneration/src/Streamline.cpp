@@ -15,6 +15,10 @@ void StreamlineFG::LoadInterposer()
 	slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
 	slIsFeatureSupported = (PFun_slIsFeatureSupported*)GetProcAddress(interposer, "slIsFeatureSupported");
 	slGetFeatureFunction = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
+	slSetTag = (PFun_slSetTag2*)GetProcAddress(interposer, "slSetTag");
+	slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
+	slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
+	slEvaluateFeature = (PFun_slEvaluateFeature*)GetProcAddress(interposer, "slEvaluateFeature");
 }
 
 bool StreamlineFG::InitStreamline()
@@ -22,6 +26,10 @@ bool StreamlineFG::InitStreamline()
 	if (!interposer || !slInit) return false;
 
 	REX::INFO("[DLSSG] Initializing Streamline");
+
+	// Pre-load plugin DLLs for MO2 USVFS compatibility
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
+	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
 
 	sl::Preferences pref{};
 	pref.showConsole = false;
@@ -32,12 +40,10 @@ bool StreamlineFG::InitStreamline()
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4";
-	// Disable OTA to force loading our local SDK-matched plugin DLLs (v2.10.3)
-	// Default flags include eAllowOTA | eLoadDownloadedPlugins which pulls v2.11.0 from cache
 	pref.flags = sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseManualHooking;
 	pref.renderAPI = sl::RenderAPI::eD3D12;
 
-	// Get the real path where sl.interposer.dll lives (resolves through MO2 USVFS)
+	// Get the real path where sl.interposer.dll lives
 	static wchar_t interposerDir[MAX_PATH];
 	GetModuleFileNameW(interposer, interposerDir, MAX_PATH);
 	wchar_t* lastSlash = wcsrchr(interposerDir, L'\\');
@@ -47,10 +53,6 @@ bool StreamlineFG::InitStreamline()
 	static const wchar_t* pluginPaths[] = { interposerDir };
 	pref.pathsToPlugins = pluginPaths;
 	pref.numPathsToPlugins = 1;
-
-	// Pre-load plugin DLLs for MO2 USVFS compatibility
-	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
-	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
 
 	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
 	pref.featuresToLoad = features;
@@ -89,26 +91,6 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 {
 	if (!slInitialized) return false;
 
-	// Skip feature support check — we know we have an RTX 40+ from GPU logging
-	// slIsFeatureSupported returns MissingOrInvalidAPI with eD3D11 render API
-	// but the feature works through the swap chain interception pathway
-	// Try to explicitly enable the feature before loading functions
-	auto slSetFeatureLoaded = (PFun_slSetFeatureLoaded*)GetProcAddress(interposer, "slSetFeatureLoaded");
-	auto slIsFeatureLoaded = (PFun_slIsFeatureLoaded*)GetProcAddress(interposer, "slIsFeatureLoaded");
-
-	if (slIsFeatureLoaded) {
-		bool loaded = false;
-		auto r = slIsFeatureLoaded(sl::kFeatureDLSS_G, loaded);
-		REX::INFO("[DLSSG] Feature loaded? {} (result={})", loaded, (int)r);
-	}
-
-	if (slSetFeatureLoaded) {
-		auto r = slSetFeatureLoaded(sl::kFeatureDLSS_G, true);
-		REX::INFO("[DLSSG] SetFeatureLoaded result: {}", (int)r);
-	}
-
-	REX::INFO("[DLSSG] Loading DLSS-G feature functions");
-
 	// Load DLSS-G specific functions
 	if (slGetFeatureFunction) {
 		auto r1 = slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
@@ -126,7 +108,6 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	sl::DLSSGOptions options{};
 	options.mode = sl::DLSSGMode::eOn;
 	options.numFramesToGenerate = 1;
-	sl::ViewportHandle viewport{ 0 };
 
 	auto result = slDLSSGSetOptions(viewport, options);
 	REX::INFO("[DLSSG] SetOptions result: {}", (int)result);
@@ -139,39 +120,92 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	featureDLSSG = true;
 	REX::INFO("[DLSSG] DLSS-G enabled!");
 
-	// Query state
 	if (slDLSSGGetState) {
 		sl::DLSSGState state{};
 		slDLSSGGetState(viewport, state, nullptr);
-		REX::INFO("[DLSSG] State: status={}, minDim={}, maxFrames={}", (int)state.status, state.minWidthOrHeight, state.numFramesToGenerateMax);
+		REX::INFO("[DLSSG] State: status={}, minDim={}, maxFrames={}",
+			(int)state.status, state.minWidthOrHeight, state.numFramesToGenerateMax);
 	}
 
 	return true;
 }
 
-void StreamlineFG::Present(bool a_useFrameGen)
+void StreamlineFG::Present(bool a_useFrameGen,
+	ID3D12GraphicsCommandList* a_cmdList,
+	ID3D12Resource* a_depth,
+	ID3D12Resource* a_motionVectors,
+	ID3D12Resource* a_hudlessColor,
+	float2 a_screenSize, float2 a_renderSize,
+	float2 a_jitter,
+	float a_cameraNear, float a_cameraFar)
 {
-	// Lazy init — try loading feature functions on first Present if not loaded yet
-	if (!slDLSSGSetOptions && slGetFeatureFunction && slInitialized) {
-		static int retryCount = 0;
-		if (retryCount < 5) {
-			slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
-			slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
-			retryCount++;
-			if (slDLSSGSetOptions) {
-				REX::INFO("[DLSSG] Feature functions loaded on retry {}", retryCount);
-				featureDLSSG = true;
-			}
+	if (!featureDLSSG) return;
+
+	// 1. Get frame token
+	if (slGetNewFrameToken) {
+		if (SL_FAILED(res, slGetNewFrameToken(frameToken, nullptr))) {
+			static bool loggedOnce = false;
+			if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to get frame token"); loggedOnce = true; }
+			return;
 		}
 	}
 
-	if (!featureDLSSG || !slDLSSGSetOptions) return;
+	// 2. Set per-frame constants
+	if (slSetConstants && frameToken) {
+		sl::Constants constants{};
+		constants.cameraNear = a_cameraNear;
+		constants.cameraFar = a_cameraFar;
+		constants.cameraAspectRatio = a_screenSize.x / a_screenSize.y;
+		constants.cameraFOV = 0.0f;
+		constants.cameraMotionIncluded = sl::Boolean::eTrue;
+		constants.cameraPinholeOffset = { 0.f, 0.f };
+		constants.depthInverted = sl::Boolean::eFalse;
+		constants.jitterOffset = { -a_jitter.x, -a_jitter.y };
+		constants.mvecScale = { a_renderSize.x, a_renderSize.y };
+		constants.reset = sl::Boolean::eFalse;
+		constants.motionVectors3D = sl::Boolean::eFalse;
+		constants.motionVectorsInvalidValue = FLT_MIN;
+		constants.orthographicProjection = sl::Boolean::eFalse;
+		constants.motionVectorsDilated = sl::Boolean::eFalse;
+		constants.motionVectorsJittered = sl::Boolean::eFalse;
 
-	sl::DLSSGOptions options{};
-	options.mode = a_useFrameGen ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-	options.numFramesToGenerate = 1;
-	sl::ViewportHandle viewport{ 0 };
-	slDLSSGSetOptions(viewport, options);
+		if (SL_FAILED(res, slSetConstants(constants, *frameToken, viewport))) {
+			static bool loggedOnce = false;
+			if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to set constants"); loggedOnce = true; }
+		}
+	}
+
+	// 3. Tag D3D12 resources
+	if (slSetTag && a_depth && a_motionVectors && a_hudlessColor) {
+		sl::Resource depth = { sl::ResourceType::eTex2d, a_depth, 0 };
+		sl::Resource mvec = { sl::ResourceType::eTex2d, a_motionVectors, 0 };
+		sl::Resource hudless = { sl::ResourceType::eTex2d, a_hudlessColor, 0 };
+
+		sl::ResourceTag depthTag = { &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
+		sl::ResourceTag mvecTag = { &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
+		sl::ResourceTag hudlessTag = { &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr };
+
+		sl::ResourceTag tags[] = { depthTag, mvecTag, hudlessTag };
+		slSetTag(viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
+
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::INFO("[DLSSG] First resource tag: depth={:#x}, mvec={:#x}, hudless={:#x}",
+				(uintptr_t)a_depth, (uintptr_t)a_motionVectors, (uintptr_t)a_hudlessColor);
+			loggedOnce = true;
+		}
+	}
+
+	// 4. Toggle DLSS-G mode
+	if (slDLSSGSetOptions) {
+		sl::DLSSGOptions options{};
+		options.mode = a_useFrameGen ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
+		options.numFramesToGenerate = 1;
+		slDLSSGSetOptions(viewport, options);
+	}
+
+	// DLSS-G generates frames asynchronously when swapChain->Present() is called
+	// No slEvaluateFeature needed — Streamline intercepts Present internally
 }
 
 void StreamlineFG::Shutdown()

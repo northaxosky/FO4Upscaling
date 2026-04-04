@@ -9,6 +9,18 @@
 
 extern bool enbLoaded;
 
+[[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
+{
+	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
+	return singleton.get();
+}
+
+[[nodiscard]] static RE::BSGraphics::RenderTargetManager* RenderTargetManager_GetSingleton()
+{
+	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
+	return singleton.get();
+}
+
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
@@ -207,10 +219,32 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !main->inMenuMode && !ui->movementToDirectionalCount;
 
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		// DLSS-G: Streamline handles frame gen in its swap chain interception
+		// DLSS-G: tag resources and set constants before FSR3 swap chain presents
 		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->Present(useFrameGenerationThisFrame);
-		// Still need FSR3 swap chain for the actual D3D11→D3D12 present pipeline
+
+		static auto gameViewport = State_GetSingleton();
+		static auto renderTargetManager = RenderTargetManager_GetSingleton();
+
+		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+		auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio,
+			screenSize.y * renderTargetManager->dynamicHeightRatio);
+
+		float2 jitter;
+		jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
+		jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
+
+		float cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
+		float cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+
+		dlssg->Present(useFrameGenerationThisFrame,
+			commandLists[frameIndex].get(),
+			upscaling->depthBufferShared12[frameIndex].get(),
+			upscaling->motionVectorBufferShared12[frameIndex].get(),
+			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			screenSize, renderSize, jitter,
+			cameraNear, cameraFar);
+
+		// FSR3 swap chain still handles the D3D11→D3D12 present pipeline (frame gen disabled)
 		FidelityFX::GetSingleton()->Present(false);
 	} else {
 		// FSR3: Dispatch frame generation via FidelityFX

@@ -48,20 +48,20 @@ while ! tasklist.exe 2>/dev/null | grep -qi "Fallout4"; do
 done
 echo "Fallout4.exe detected"
 
-# --- Phase 3b: Wait for main menu, focus game, send E to load save ---
-echo "Waiting for main menu..."
+# --- Phase 3b: Wait for save to auto-load ---
+echo "Waiting for save to auto-load..."
 UPSCALING_LOG="$F4SE_LOG_DIR/Upscaling.log"
 FG_LOG="$F4SE_LOG_DIR/AAAFrameGeneration.log"
 MENU_WAIT=$SECONDS
 while (( SECONDS - MENU_WAIT < 60 )); do
     if [ -f "$UPSCALING_LOG" ] && grep -q "Data loaded" "$UPSCALING_LOG" 2>/dev/null; then
-        echo "Main menu reached, focusing game window..."
-        sleep 3
+        echo "Data loaded, waiting for save auto-load..."
+        sleep 45
+        # Focus game window for screenshot
         powershell.exe -Command '
             Add-Type @"
                 using System;
                 using System.Runtime.InteropServices;
-                using System.Diagnostics;
                 public class FocusHelper {
                     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
                     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
@@ -82,14 +82,10 @@ while (( SECONDS - MENU_WAIT < 60 )); do
             $proc = Get-Process -Name "Fallout4" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
                 [FocusHelper]::Focus($proc.MainWindowHandle)
-                Start-Sleep -Seconds 1
-                Add-Type -AssemblyName System.Windows.Forms
-                [System.Windows.Forms.SendKeys]::SendWait("e")
-                Start-Sleep -Seconds 2
-                [System.Windows.Forms.SendKeys]::SendWait("e")
             }
         ' 2>/dev/null || true
-        echo "Save load triggered"
+        sleep 2
+        echo "Save should be loaded"
         break
     fi
     sleep 3

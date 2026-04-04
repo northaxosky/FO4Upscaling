@@ -204,8 +204,19 @@ void StreamlineFG::Present(bool a_useFrameGen,
 		slDLSSGSetOptions(viewport, options);
 	}
 
-	// DLSS-G generates frames asynchronously when swapChain->Present() is called
-	// No slEvaluateFeature needed — Streamline intercepts Present internally
+	// 5. Evaluate DLSS-G feature to dispatch frame generation
+	if (slEvaluateFeature && a_useFrameGen && frameToken) {
+		sl::ViewportHandle view(viewport);
+		const sl::BaseStructure* inputs[] = { &view };
+		auto result = slEvaluateFeature(sl::kFeatureDLSS_G, *frameToken, inputs, _countof(inputs),
+			(sl::CommandBuffer*)a_cmdList);
+
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::INFO("[DLSSG] First slEvaluateFeature result: {}", (int)result);
+			loggedOnce = true;
+		}
+	}
 }
 
 void StreamlineFG::Shutdown()

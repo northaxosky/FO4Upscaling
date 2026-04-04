@@ -65,9 +65,14 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 	swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-	// Always use FSR3 swap chain for D3D11→D3D12 present pipeline
-	// DLSS-G frame gen runs as an additional step in the Present path
-	CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
+	auto upscaling = Upscaling::GetSingleton();
+
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		// DLSS-G needs a plain swap chain — FFX wrapping interferes with Streamline interception
+		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
+	} else {
+		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
+	}
 
 	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
 	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
@@ -244,8 +249,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			screenSize, renderSize, jitter,
 			cameraNear, cameraFar);
 
-		// FSR3 swap chain still handles the D3D11→D3D12 present pipeline (frame gen disabled)
-		FidelityFX::GetSingleton()->Present(false);
+		// Don't call FidelityFX::Present — let Streamline handle the swap chain directly
 	} else {
 		// FSR3: Dispatch frame generation via FidelityFX
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);

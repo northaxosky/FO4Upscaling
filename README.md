@@ -1,6 +1,6 @@
 # FO4Upscaling
 
-F4SE plugins for Fallout 4 providing frame generation and spatial upscaling (FSR3 + DLSS).
+F4SE plugins for Fallout 4 providing frame generation and spatial upscaling.
 
 Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearModdingFO4 CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4) for single-DLL multi-runtime support (OG/NG/AE).
 
@@ -8,8 +8,22 @@ Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearM
 
 | Plugin | DLL | Description |
 |--------|-----|-------------|
-| **AAAFrameGeneration** | `AAAFrameGeneration.dll` | AMD FidelityFX frame generation via D3D11/D3D12 interop |
+| **AAAFrameGeneration** | `AAAFrameGeneration.dll` | Frame generation with FSR3 (AMD) and DLSS-G (NVIDIA RTX 40+) via D3D11/D3D12 interop |
 | **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline |
+
+## Frame Generation
+
+The FrameGeneration plugin supports two backends, configurable via `FrameGeneration.ini`:
+
+| Backend | Setting | GPU Requirement | Description |
+|---------|---------|-----------------|-------------|
+| **FSR3** | `iFrameGenType=0` | Any GPU | AMD FidelityFX frame interpolation |
+| **DLSS-G** | `iFrameGenType=1` | NVIDIA RTX 40+ | NVIDIA DLSS Frame Generation via Streamline SDK |
+
+DLSS-G integration uses the NVIDIA Streamline SDK with:
+- D3D11-to-D3D12 interop (game renders D3D11, frame gen runs D3D12)
+- Reflex low-latency markers for frame pacing
+- Automatic swap chain management via Streamline's manual hooking API
 
 ## Requirements
 
@@ -64,19 +78,22 @@ Results are saved to `test-results/<timestamp>/` with logs, screenshots, and a p
 
 ```
 plugins/
-  FrameGeneration/       # AAAFrameGeneration target
-  Upscaling/             # Upscaling target
+  FrameGeneration/       # AAAFrameGeneration target (FSR3 + DLSS-G frame gen)
+  Upscaling/             # Upscaling target (FSR3 + DLSS spatial upscaling)
 include/                 # Shared headers (PCH, ENB SDK, Detours)
 extern/
   CommonLibF4/           # DearModdingFO4 (address-independent, all runtimes)
   FidelityFX-SDK/        # AMD FSR3 SDK
-  Streamline/            # NVIDIA Streamline SDK (DLSS)
+  Streamline/            # NVIDIA Streamline SDK v2.10.3 (DLSS, DLSS-G, Reflex)
+package/
+  F4SE/Plugins/          # Runtime files (HLSL shaders, INI configs, Streamline DLLs)
 cmake/
   Common.cmake           # Shared build config (configure_xse_plugin function)
 scripts/
   .env.example           # Template for local path config
   deploy.sh              # Build + deploy to MO2 test mod
   test.sh                # Automated game test pipeline
+  compare-fg.sh          # A/B/C comparison: No FG vs FSR3 vs DLSS-G
 ```
 
 ## License

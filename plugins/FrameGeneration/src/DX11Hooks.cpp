@@ -124,17 +124,17 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				(*ppDevice)->GetImmediateContext(&context);
 				proxy->SetD3D11DeviceContext(context);
 
-				proxy->CreateD3D12Device(adapter);
-
-				// For DLSS-G: init NGX first, then Streamline
+				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
-
-					// Init NGX FIRST so sl.dlss_g can query feature requirements
-					NVSDK_NGX_D3D12_Init(0x12345678, L".", proxy->d3d12Device.get());
-					REX::INFO("[FG] NGX pre-initialized for DLSS-G");
-
 					dlssg->InitStreamline();
+				}
+
+				proxy->CreateD3D12Device(adapter);
+
+				// Set D3D12 device for Streamline IMMEDIATELY after creation
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto dlssg = StreamlineFG::GetSingleton();
 					dlssg->SetD3DDevice(proxy->d3d12Device.get());
 				}
 

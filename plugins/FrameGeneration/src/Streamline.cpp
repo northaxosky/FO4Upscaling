@@ -31,8 +31,10 @@ bool StreamlineFG::InitStreamline()
 	};
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
-	pref.projectId = "f4-frame-generation";
-	pref.flags |= sl::PreferenceFlags::eUseManualHooking;
+	pref.projectId = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4";
+	// Disable OTA to force loading our local SDK-matched plugin DLLs (v2.10.3)
+	// Default flags include eAllowOTA | eLoadDownloadedPlugins which pulls v2.11.0 from cache
+	pref.flags = sl::PreferenceFlags::eDisableCLStateTracking | sl::PreferenceFlags::eUseManualHooking;
 	pref.renderAPI = sl::RenderAPI::eD3D12;
 
 	// Get the real path where sl.interposer.dll lives (resolves through MO2 USVFS)
@@ -50,9 +52,9 @@ bool StreamlineFG::InitStreamline()
 	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
 	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
 
-	static sl::Feature features[] = { sl::kFeatureDLSS_G };
+	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
 	pref.featuresToLoad = features;
-	pref.numFeaturesToLoad = 1;
+	pref.numFeaturesToLoad = _countof(features);
 
 	auto result = slInit(pref, sl::kSDKVersion);
 	REX::INFO("[DLSSG] slInit result: {}", (int)result);

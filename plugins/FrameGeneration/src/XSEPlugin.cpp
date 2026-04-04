@@ -45,9 +45,9 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	while (!REX::W32::IsDebuggerPresent()) {};
 #endif
 
-	DX11Hooks::Install();
-
 	Upscaling::GetSingleton()->LoadSettings();
+
+	DX11Hooks::Install();
 
 	auto messaging = F4SE::GetMessagingInterface();
 	messaging->RegisterListener(MessageHandler);

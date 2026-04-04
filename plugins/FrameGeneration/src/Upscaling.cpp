@@ -121,9 +121,11 @@ void Upscaling::LoadSettings()
 
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
+	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
 
 	REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
 	REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
+	REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G)", settings.frameGenType);
 }
 
 void Upscaling::PostPostLoad()

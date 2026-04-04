@@ -13,64 +13,85 @@ else
 fi
 
 RESULTS_DIR="$PROJECT_ROOT/test-results/$(date +%Y%m%d_%H%M%S)"
-TIMEOUT_SECONDS=180
-STABILIZE_SECONDS=15
+TIMEOUT_SECONDS=120
+STABILIZE_SECONDS=10
 
-# Kill any existing game/MO2 instances
-cleanup_processes() {
+# Kill game process only — do NOT kill MO2, RootBuilder needs it alive to unmount root mods
+kill_game() {
     taskkill.exe //F //IM Fallout4.exe 2>/dev/null || true
-    taskkill.exe //F //IM "$(basename "$MO2_EXE")" 2>/dev/null || true
-    sleep 2
+    sleep 5
 }
 
 # --- Phase 1: Build & Deploy ---
 echo "=== Phase 1: Build & Deploy ==="
 "$SCRIPT_DIR/deploy.sh" build
 
-# --- Phase 2: Ensure clean state ---
+# --- Phase 2: Kill stale game process ---
 echo "=== Phase 2: Cleanup ==="
-cleanup_processes
+taskkill.exe //F //IM Fallout4.exe 2>/dev/null || true
+sleep 2
 
 # --- Phase 3: Launch game via MO2 ---
 echo "=== Phase 3: Launching Fallout 4 ==="
-"$MO2_EXE" -p "$MO2_PROFILE" "moshortcut://F4SE" &
+"$MO2_EXE" -p "$MO2_PROFILE" "moshortcut://${MO2_EXECUTABLE:-F4SE}" &
 
 echo "Waiting for Fallout4.exe..."
 WAIT_START=$SECONDS
 while ! tasklist.exe 2>/dev/null | grep -qi "Fallout4"; do
-    if (( SECONDS - WAIT_START > 60 )); then
-        echo "FAIL: Fallout4.exe did not start within 60s"
+    if (( SECONDS - WAIT_START > 30 )); then
+        echo "FAIL: Fallout4.exe did not start within 30s"
         mkdir -p "$RESULTS_DIR"
         echo "RESULT: FAIL - Game did not start" > "$RESULTS_DIR/result.txt"
         exit 1
     fi
     sleep 2
 done
-ELAPSED=$(( SECONDS - WAIT_START ))
-echo "Fallout4.exe detected (${ELAPSED}s)"
+echo "Fallout4.exe detected"
 
-# --- Phase 3b: Wait for main menu, then send E twice to load save ---
-echo "Waiting for main menu (Data loaded marker)..."
-MENU_WAIT=$SECONDS
+# --- Phase 3b: Wait for save to auto-load ---
+echo "Waiting for save to auto-load..."
 UPSCALING_LOG="$F4SE_LOG_DIR/Upscaling.log"
 FG_LOG="$F4SE_LOG_DIR/AAAFrameGeneration.log"
-while (( SECONDS - MENU_WAIT < 120 )); do
+MENU_WAIT=$SECONDS
+while (( SECONDS - MENU_WAIT < 60 )); do
     if [ -f "$UPSCALING_LOG" ] && grep -q "Data loaded" "$UPSCALING_LOG" 2>/dev/null; then
-        echo "Main menu reached, sending E to load save..."
-        sleep 5
-        powershell.exe -Command "
-            Add-Type -AssemblyName System.Windows.Forms
-            [System.Windows.Forms.SendKeys]::SendWait('e')
-            Start-Sleep -Seconds 2
-            [System.Windows.Forms.SendKeys]::SendWait('e')
-        " 2>/dev/null || true
-        echo "Save load triggered"
+        echo "Data loaded, waiting for save auto-load..."
+        sleep 30
+        # Focus game window for screenshot
+        powershell.exe -Command '
+            Add-Type @"
+                using System;
+                using System.Runtime.InteropServices;
+                public class FocusHelper {
+                    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+                    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+                    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+                    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+                    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+                    public static void Focus(IntPtr hwnd) {
+                        uint pid;
+                        uint targetThread = GetWindowThreadProcessId(hwnd, out pid);
+                        uint currentThread = GetCurrentThreadId();
+                        AttachThreadInput(currentThread, targetThread, true);
+                        ShowWindow(hwnd, 9);
+                        SetForegroundWindow(hwnd);
+                        AttachThreadInput(currentThread, targetThread, false);
+                    }
+                }
+"@
+            $proc = Get-Process -Name "Fallout4" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+                [FocusHelper]::Focus($proc.MainWindowHandle)
+            }
+        ' 2>/dev/null || true
+        sleep 2
+        echo "Save should be loaded"
         break
     fi
     sleep 3
 done
 
-# --- Phase 4: Monitor ---
+# --- Phase 4: Monitor for rendering activity ---
 echo "=== Phase 4: Monitoring ==="
 UPSCALING_LOG="$F4SE_LOG_DIR/Upscaling.log"
 FG_LOG="$F4SE_LOG_DIR/AAAFrameGeneration.log"
@@ -86,8 +107,7 @@ while (( SECONDS - GAME_START < TIMEOUT_SECONDS )); do
     fi
 
     if [ -f "$UPSCALING_LOG" ] && grep -q "\[UPSCALE\]\|\[RES\]\|\[RT\].*Recreating\|UpdateUpscaling first" "$UPSCALING_LOG" 2>/dev/null; then
-        echo "Upscaling plugin loaded successfully"
-        echo "Stabilizing for ${STABILIZE_SECONDS}s..."
+        echo "Rendering detected, stabilizing ${STABILIZE_SECONDS}s..."
         sleep $STABILIZE_SECONDS
 
         if ! tasklist.exe 2>/dev/null | grep -qi "Fallout4"; then
@@ -107,29 +127,10 @@ mkdir -p "$RESULTS_DIR"
 cp "$UPSCALING_LOG" "$RESULTS_DIR/" 2>/dev/null || true
 cp "$FG_LOG" "$RESULTS_DIR/" 2>/dev/null || true
 
-# Check Windows Event Log for crashes
-powershell.exe -Command "
-    Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2; StartTime=(Get-Date).AddMinutes(-5)} -ErrorAction SilentlyContinue |
-    Where-Object { \$_.Message -like '*Fallout4*' } |
-    Select-Object TimeCreated, Message |
-    Out-File -FilePath '$RESULTS_DIR/event_log.txt' -Encoding utf8
-" 2>/dev/null || true
-
-# Take screenshot if game is still running
+# Take screenshot if game is still running (DXGI desktop duplication via dxcam)
 if $SUCCESS && tasklist.exe 2>/dev/null | grep -qi "Fallout4"; then
     SCREENSHOT_FILE="$RESULTS_DIR/screenshot.png"
-    SCREENSHOT_WIN=$(cygpath -w "$SCREENSHOT_FILE")
-    powershell.exe -Command "
-        Add-Type -AssemblyName System.Windows.Forms
-        Add-Type -AssemblyName System.Drawing
-        \$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-        \$bmp = New-Object System.Drawing.Bitmap(\$screen.Width, \$screen.Height)
-        \$gfx = [System.Drawing.Graphics]::FromImage(\$bmp)
-        \$gfx.CopyFromScreen(\$screen.Location, [System.Drawing.Point]::Empty, \$screen.Size)
-        \$bmp.Save('$SCREENSHOT_WIN', [System.Drawing.Imaging.ImageFormat]::Png)
-        \$gfx.Dispose()
-        \$bmp.Dispose()
-    " 2>/dev/null && echo "Screenshot captured: $SCREENSHOT_FILE" || echo "Screenshot failed"
+    python "$SCRIPT_DIR/screenshot.py" "$SCREENSHOT_FILE" 2>/dev/null && echo "Screenshot captured" || echo "Screenshot failed"
 fi
 
 # Summary
@@ -156,6 +157,6 @@ cat "$RESULTS_DIR/result.txt"
 
 # --- Phase 6: Kill game ---
 echo "=== Phase 6: Cleanup ==="
-cleanup_processes
+kill_game
 
 echo "Results: $RESULTS_DIR"

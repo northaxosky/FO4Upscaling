@@ -6,6 +6,8 @@
 #include "Upscaling.h"
 #include "DX12SwapChain.h"
 #include "FidelityFX.h"
+#include "Streamline.h"
+#include <nvsdk_ngx.h>
 
 #include "ENB/ENBSeriesAPI.h"
 
@@ -56,11 +58,32 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 	auto upscaling = Upscaling::GetSingleton();
 
 	if (pSwapChainDesc->Windowed) {
+		// Log GPU info
+		if (pAdapter) {
+			DXGI_ADAPTER_DESC adapterDesc;
+			if (SUCCEEDED(pAdapter->GetDesc(&adapterDesc))) {
+				std::string gpuName;
+				for (int i = 0; i < 128 && adapterDesc.Description[i]; i++)
+					gpuName += static_cast<char>(adapterDesc.Description[i]);
+				REX::INFO("[FG] GPU: {} (VRAM: {}MB, VendorId: {:#x}, DeviceId: {:#x})",
+					gpuName, adapterDesc.DedicatedVideoMemory / (1024 * 1024),
+					adapterDesc.VendorId, adapterDesc.DeviceId);
+			}
+		}
+
 		REX::INFO("[Frame Generation] Frame Generation enabled, using D3D12 proxy");
-		
+
 		auto fidelityFX = FidelityFX::GetSingleton();
 
-		if (fidelityFX->module) {
+		bool hasBackend = fidelityFX->module;
+
+		// For DLSS-G, tentatively enable — actual init after D3D12 device creation
+		if (upscaling->settings.frameGenType == 1) {
+			upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
+			hasBackend = true;
+		}
+
+		if (hasBackend) {
 			upscaling->d3d12Interop = true;
 			upscaling->refreshRate = Upscaling::GetRefreshRate(pSwapChainDesc->OutputWindow);
 
@@ -101,8 +124,30 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				(*ppDevice)->GetImmediateContext(&context);
 				proxy->SetD3D11DeviceContext(context);
 
+				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto dlssg = StreamlineFG::GetSingleton();
+					dlssg->InitStreamline();
+				}
+
 				proxy->CreateD3D12Device(adapter);
+				proxy->CreateD3D12CommandQueues();
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
+
+				// DLSS-G: upgrade swap chain BEFORE slSetD3DDevice
+				// slSetD3DDevice triggers plugin init which processes Present hooks
+				// The swap chain must exist at that point for hooks to register
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+					auto dlssg = StreamlineFG::GetSingleton();
+					dlssg->UpgradeSwapChain(&proxy->swapChain);
+					dlssg->SetD3DDevice(proxy->d3d12Device.get());
+
+					if (!dlssg->CheckAndEnableDLSSG()) {
+						REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");
+						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+					}
+				}
+
 				proxy->CreateInterop();
 
 				*ppSwapChain = proxy->GetSwapChainProxy();
@@ -111,7 +156,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			}
 
 		} else {
-			REX::WARN("[Frame Generation] amd_fidelityfx_dx12.dll is not loaded, skipping proxy");
+			REX::WARN("[Frame Generation] No frame generation backend available, skipping proxy");
 		}
 	}
 
@@ -141,8 +186,17 @@ void DX11Hooks::Install()
 		REX::INFO("ENB not detected, using standard swap chain hook");
 	}
 
+	auto upscaling = Upscaling::GetSingleton();
 	auto fidelityFX = FidelityFX::GetSingleton();
+
+	// Always load FidelityFX as fallback
 	fidelityFX->LoadFFX();
+
+	if (upscaling->settings.frameGenType == 1) {
+		REX::INFO("[FG] DLSS-G requested, loading Streamline interposer");
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->LoadInterposer();
+	}
 
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 

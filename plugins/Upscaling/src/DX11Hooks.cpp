@@ -50,9 +50,11 @@ struct hkD3D11CreateDeviceAndSwapChain
 		if (streamline->interposer){
 			REX::INFO("[SL] Interposer present, initializing Streamline...");
 			streamline->Initialize();
-			if (!enbLoaded) {
+			if (!enbLoaded && !streamline->alreadyInitialized) {
 				REX::INFO("[SL] Upgrading swap chain interface (no ENB)");
 				streamline->slUpgradeInterface((void**)&(*ppSwapChain));
+			} else if (streamline->alreadyInitialized) {
+				REX::INFO("[SL] Skipping swap chain upgrade (FrameGen plugin owns Streamline)");
 			} else {
 				REX::INFO("[SL] Skipping swap chain upgrade (ENB loaded)");
 			}

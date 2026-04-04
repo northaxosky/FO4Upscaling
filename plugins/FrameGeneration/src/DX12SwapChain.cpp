@@ -4,14 +4,31 @@
 #include <dxgi1_6.h>
 
 #include "FidelityFX.h"
+#include "Streamline.h"
 #include "Upscaling.h"
 
 extern bool enbLoaded;
 
+[[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
+{
+	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
+	return singleton.get();
+}
+
+[[nodiscard]] static RE::BSGraphics::RenderTargetManager* RenderTargetManager_GetSingleton()
+{
+	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
+	return singleton.get();
+}
+
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
+	REX::INFO("[FG] D3D12 device created");
+}
 
+void DX12SwapChain::CreateD3D12CommandQueues()
+{
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
@@ -25,6 +42,7 @@ void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
 		commandLists[i]->Close();
 	}
+	REX::INFO("[FG] D3D12 command queues created");
 }
 
 void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
@@ -47,8 +65,28 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 	swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-	ffx::CreateContextDescFrameGenerationSwapChainForHwndDX12 ffxSwapChainDesc{};
+	auto upscaling = Upscaling::GetSingleton();
 
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		// DLSS-G needs a plain swap chain — FFX wrapping interferes with Streamline interception
+		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
+	} else {
+		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
+	}
+
+	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
+	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
+
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
+
+	swapChainProxy = new DXGISwapChainProxy(swapChain);
+}
+
+void DX12SwapChain::CreateSwapChainFSR3(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	REX::INFO("[FG] Creating FSR3 swap chain via FFX");
+
+	ffx::CreateContextDescFrameGenerationSwapChainForHwndDX12 ffxSwapChainDesc{};
 	ffxSwapChainDesc.desc = &swapChainDesc;
 	ffxSwapChainDesc.dxgiFactory = a_dxgiFactory;
 	ffxSwapChainDesc.fullscreenDesc = nullptr;
@@ -62,14 +100,27 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 		REX::CRITICAL("[FidelityFX] Failed to create swap chain context!");
 	}
 
-	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
-	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
-
-	frameIndex = swapChain->GetCurrentBackBufferIndex();
-
 	fidelityFX->SetupFrameGeneration();
+	REX::INFO("[FG] FSR3 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+}
 
-	swapChainProxy = new DXGISwapChainProxy(swapChain);
+void DX12SwapChain::CreateSwapChainDLSSG(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	REX::INFO("[DLSSG] Creating standard D3D12 swap chain for Streamline interception");
+
+	winrt::com_ptr<IDXGISwapChain1> swapChain1;
+	DX::ThrowIfFailed(a_dxgiFactory->CreateSwapChainForHwnd(
+		commandQueue.get(),
+		a_swapChainDesc.OutputWindow,
+		&swapChainDesc,
+		nullptr,
+		nullptr,
+		swapChain1.put()
+	));
+
+	DX::ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain)));
+
+	REX::INFO("[DLSSG] D3D12 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
 }
 
 void DX12SwapChain::CreateInterop()
@@ -172,7 +223,52 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		if (auto ui = RE::UI::GetSingleton())
 			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !main->inMenuMode && !ui->movementToDirectionalCount;
 
-	FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		// DLSS-G: tag resources and set constants before FSR3 swap chain presents
+		auto dlssg = StreamlineFG::GetSingleton();
+
+		static auto gameViewport = State_GetSingleton();
+		static auto renderTargetManager = RenderTargetManager_GetSingleton();
+
+		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+		auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio,
+			screenSize.y * renderTargetManager->dynamicHeightRatio);
+
+		float2 jitter;
+		jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
+		jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
+
+		float cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
+		float cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+
+		// Extract camera matrices from game state
+		auto& camView = gameViewport->cameraState.camViewData;
+		auto& camState = gameViewport->cameraState;
+
+		StreamlineFG::CameraData camera;
+		camera.projMat = camView.projMat;
+		camera.currentViewProjUnjittered = camView.currentViewProjUnjittered;
+		camera.previousViewProjUnjittered = camView.previousViewProjUnjittered;
+		camera.viewUp = &camView.viewUp;
+		camera.viewRight = &camView.viewRight;
+		camera.viewDir = &camView.viewDir;
+		camera.posX = camState.posAdjust.x;
+		camera.posY = camState.posAdjust.y;
+		camera.posZ = camState.posAdjust.z;
+
+		dlssg->Present(useFrameGenerationThisFrame,
+			commandLists[frameIndex].get(),
+			upscaling->depthBufferShared12[frameIndex].get(),
+			upscaling->motionVectorBufferShared12[frameIndex].get(),
+			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			screenSize, renderSize, jitter,
+			cameraNear, cameraFar, camera);
+
+		// Don't call FidelityFX::Present — let Streamline handle the swap chain directly
+	} else {
+		// FSR3: Dispatch frame generation via FidelityFX
+		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
+	}
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 

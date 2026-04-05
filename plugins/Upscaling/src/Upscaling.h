@@ -77,6 +77,7 @@ public:
 	{
 		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS; ///< Preferred upscaling method
 		uint qualityMode = 1;									   ///< Quality mode: 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance
+		float sharpness = 0.5f;									   ///< Post-upscale sharpening: 0.0=off, 1.0=max
 	};
 
 	Settings settings;

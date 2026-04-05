@@ -266,7 +266,6 @@ void Upscaling::CreateFrameGenerationResources()
 	}
 
 	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", "cs_5_0");
-	copyColorToSharedBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyColorToSharedBufferCS.hlsl", "cs_5_0");
 	generateSharedBuffersCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", "cs_5_0");
 }
 
@@ -506,37 +505,13 @@ void Upscaling::PostDisplay()
 	
 	auto rendererData = RE::BSGraphics::GetRendererData();
 
-	auto& frameBuffer = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
-	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+	auto& swapChain = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
+	ID3D11Resource* swapChainResource;
+	reinterpret_cast<ID3D11RenderTargetView*>(swapChain.rtView)->GetResource(&swapChainResource);
+
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
-	// Use compute shader to convert R11G11B10_FLOAT → RGBA8_UNORM with proper format handling
-	static bool loggedPostDisplay = false;
-	if (!loggedPostDisplay) {
-		REX::INFO("[FG] PostDisplay: shader={:#x}, frameIdx={}", (uintptr_t)copyColorToSharedBufferCS, dx12SwapChain->frameIndex);
-		loggedPostDisplay = true;
-	}
-	if (copyColorToSharedBufferCS) {
-		uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
-		uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);
-
-		context->OMSetRenderTargets(0, nullptr, nullptr);
-
-		ID3D11ShaderResourceView* views[1] = { reinterpret_cast<ID3D11ShaderResourceView*>(frameBuffer.srView) };
-		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
-
-		ID3D11UnorderedAccessView* uavs[1] = { HUDLessBufferShared[dx12SwapChain->frameIndex]->uav.get() };
-		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
-
-		context->CSSetShader(copyColorToSharedBufferCS, nullptr, 0);
-		context->Dispatch(dispatchX, dispatchY, 1);
-
-		ID3D11ShaderResourceView* nullViews[1] = { nullptr };
-		context->CSSetShaderResources(0, ARRAYSIZE(nullViews), nullViews);
-		ID3D11UnorderedAccessView* nullUavs[1] = { nullptr };
-		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(nullUavs), nullUavs, nullptr);
-		context->CSSetShader(nullptr, nullptr, 0);
-	}
+	reinterpret_cast<ID3D11DeviceContext*>(rendererData->context)->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
 }
 
 void Upscaling::Reset()

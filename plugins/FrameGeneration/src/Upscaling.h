@@ -38,9 +38,8 @@ public:
 	winrt::com_ptr<ID3D12Resource> depthBufferShared12[2];
 	winrt::com_ptr<ID3D12Resource> motionVectorBufferShared12[2];
 
-	ID3D11ComputeShader* copyDepthToSharedBufferCS;
-	ID3D11ComputeShader* copyColorToSharedBufferCS;
-	ID3D11ComputeShader* generateSharedBuffersCS;
+	ID3D11ComputeShader* copyDepthToSharedBufferCS = nullptr;
+	ID3D11ComputeShader* generateSharedBuffersCS = nullptr;
 
 	bool setupBuffers = false;
 

@@ -132,16 +132,17 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				proxy->CreateD3D12Device(adapter);
 
-				// DLSS-G: upgrade device+factory, set device, THEN create queues/swapchain
+				// DLSS-G: upgrade device+factory via Streamline, then set device
 				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
+
 					ID3D12Device* rawDevice = proxy->d3d12Device.get();
-					dlssg->UpgradeDevice(&rawDevice);
+					dlssg->slUpgradeInterface((void**)&rawDevice);
 					proxy->d3d12Device.copy_from(rawDevice);
 
 					IDXGIFactory* rawFactory = (IDXGIFactory*)dxgiFactory;
-					dlssg->UpgradeFactory(&rawFactory);
+					dlssg->slUpgradeInterface((void**)&rawFactory);
 					dxgiFactory = (IDXGIFactory4*)rawFactory;
 
 					dlssg->SetD3DDevice(proxy->d3d12Device.get());

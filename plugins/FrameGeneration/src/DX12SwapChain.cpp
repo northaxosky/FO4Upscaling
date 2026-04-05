@@ -52,7 +52,6 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 	swapChainDesc.Width = a_swapChainDesc.BufferDesc.Width;
 	swapChainDesc.Height = a_swapChainDesc.BufferDesc.Height;
 	swapChainDesc.Format = a_swapChainDesc.BufferDesc.Format;
-	REX::INFO("[FG] Swap chain format: game={} (RGBA8=28, BGRA8=87)", (uint32_t)swapChainDesc.Format);
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	swapChainDesc.SampleDesc.Count = 1;
@@ -69,8 +68,6 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 	auto upscaling = Upscaling::GetSingleton();
 
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		// Revert to game's native format — BGRA didn't fix the pink tint
-		// DLSS-G's internal buffers match whatever format we use here
 		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
 	} else {
 		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
@@ -229,16 +226,21 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
-		// Acquire frame token first
+		// Per-frame sequence matching NVIDIA sample ordering:
+		// 1. Frame token → 2. Sleep → 3. Sim markers → 4. Constants+tags → 5. Render markers → 6. Present markers
 		dlssg->AcquireFrameToken();
 
-		// Set constants and tag resources BEFORE markers (Reflex needs constants present)
+		if (dlssg->slReflexSleep && dlssg->frameToken)
+			dlssg->slReflexSleep(*dlssg->frameToken);
+
+		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationStart);
+		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationEnd);
+
+		// Set constants and tag resources
 		static auto gameViewport = State_GetSingleton();
 		static auto renderTargetManager = RenderTargetManager_GetSingleton();
 
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-		auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio,
-			screenSize.y * renderTargetManager->dynamicHeightRatio);
 
 		float2 jitter;
 		jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
@@ -252,7 +254,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 		StreamlineFG::CameraData camera;
 		camera.viewMat = camView.viewMat;
-		camera.projMat = camView.projMat;
 		camera.viewProjUnjittered = camView.viewProjUnjittered;
 		camera.currentViewProjUnjittered = camView.currentViewProjUnjittered;
 		camera.previousViewProjUnjittered = camView.previousViewProjUnjittered;
@@ -263,60 +264,39 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		camera.posY = camState.posAdjust.y;
 		camera.posZ = camState.posAdjust.z;
 
-		dlssg->Present(useFrameGenerationThisFrame,
+		dlssg->Present(
 			commandLists[frameIndex].get(),
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get(),
-			screenSize, renderSize, jitter,
+			screenSize, jitter,
 			cameraNear, cameraFar, camera);
-
-		// Reflex markers AFTER constants are set
-		if (dlssg->slReflexSleep && dlssg->frameToken)
-			dlssg->slReflexSleep(*dlssg->frameToken);
-
-		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationStart);
-		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationEnd);
 
 		isDLSSGFrame = true;
 	} else {
-		// FSR3: Dispatch frame generation via FidelityFX
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
 	}
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 
-	// Reflex: render submit markers bracket GPU work submission
-	if (isDLSSGFrame) {
-		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
-	}
+	// Bracket GPU work submission with render markers
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
 
 	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
 	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
 
-	if (isDLSSGFrame) {
-		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
-	}
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
 
 	// Fix FPS cap being e.g. 55 instead of 60
 	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
-	// Reflex: present markers bracket the swap chain Present — DLSS-G uses these to trigger frame gen
-	if (isDLSSGFrame) {
-		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->SetPCLMarker(sl::PCLMarker::ePresentStart);
-	}
+	// Bracket Present with markers — ePresentStart sets kMarkerPresentFrame for DLSS-G
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);
 
-	// Present the frame
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
 
-	if (isDLSSGFrame) {
-		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->SetPCLMarker(sl::PCLMarker::ePresentEnd);
-	}
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
 
 	// Wait for previous frame to have finished
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();

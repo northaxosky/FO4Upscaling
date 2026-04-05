@@ -955,8 +955,16 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 		currentUpscaleMethod = UpscaleMethod::kFSR;
 	}
 
-	// ENB compatibility: FSR and DLSS work alongside ENB — render target swaps
-	// propagate through ENB's wrapper, and upscaling completes before ENB's post-processing
+	// ENB compatibility: sub-native upscaling causes viewport compounding with ENB's pipeline.
+	// Force disabled when ENB is active — DLAA (native-res AA) is not yet supported either.
+	if (enbLoaded) {
+		static bool loggedENBFallback = false;
+		if (!loggedENBFallback) {
+			REX::INFO("[UPSCALE] ENB detected — upscaling disabled. Sub-native rendering not yet supported with ENB.");
+			loggedENBFallback = true;
+		}
+		return UpscaleMethod::kDisabled;
+	}
 
 	static bool loggedOnce = false;
 	if (!loggedOnce && !a_checkMenu) {

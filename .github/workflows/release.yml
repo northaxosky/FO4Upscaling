@@ -1,13 +1,12 @@
-name: Build
+name: Release
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+    paths: [version.txt]
 
 jobs:
-  build:
+  release:
     runs-on: windows-latest
 
     steps:
@@ -17,43 +16,66 @@ jobs:
           submodules: recursive
           lfs: true
 
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "version=$(cat version.txt | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag exists
+        id: check_tag
+        shell: bash
+        run: |
+          if git ls-remote --tags origin "v${{ steps.version.outputs.version }}" | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup vcpkg
+        if: steps.check_tag.outputs.exists == 'false'
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: 'b472291f295551b7127359ea38fdd2ca092f6f1b'
 
       - name: Prepare CommonLibF4
+        if: steps.check_tag.outputs.exists == 'false'
         shell: bash
         run: cp cmake/CommonLibF4.cmake.txt extern/CommonLibF4/CMakeLists.txt
 
       - name: Configure
+        if: steps.check_tag.outputs.exists == 'false'
         run: cmake -S . --preset=default
 
       - name: Build
+        if: steps.check_tag.outputs.exists == 'false'
         run: cmake --build build --config Release
 
       - name: Package mod
+        if: steps.check_tag.outputs.exists == 'false'
         shell: bash
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           mkdir -p staging/F4SE/Plugins
           # Built DLLs
           cp build/plugins/FrameGeneration/Release/AAAFrameGeneration.dll staging/F4SE/Plugins/
           cp build/plugins/Upscaling/Release/Upscaling.dll staging/F4SE/Plugins/
-          # Package assets (shaders, DLLs, configs)
+          # Package assets
           cp -r package/F4SE/Plugins/* staging/F4SE/Plugins/
-          # FrameGeneration needs its own Streamline copy
           mkdir -p staging/F4SE/Plugins/FrameGeneration/Streamline
           for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do
             [ -f "package/F4SE/Plugins/Streamline/$dll" ] && cp "package/F4SE/Plugins/Streamline/$dll" staging/F4SE/Plugins/FrameGeneration/Streamline/
           done
-          # MCM config
           cp -r package/MCM staging/
-          # Game asset overrides
           [ -d package/Meshes ] && cp -r package/Meshes staging/
           [ -d package/Textures ] && cp -r package/Textures staging/
+          # Create zip
+          cd staging && 7z a -tzip "../FO4Upscaling-v${VERSION}.zip" . && cd ..
 
-      - name: Upload mod package
-        uses: actions/upload-artifact@v4
+      - name: Create release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
         with:
-          name: FO4Upscaling
-          path: staging/
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: FO4Upscaling-v${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true

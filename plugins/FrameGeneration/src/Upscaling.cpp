@@ -113,19 +113,30 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 
 void Upscaling::LoadSettings()
 {
-	REX::INFO("[Frame Generation] Loading settings");
-
 	CSimpleIniA ini;
 	ini.SetUnicode();
-	ini.LoadFile("Data\\F4SE\\Plugins\\FrameGeneration.ini");
+	// Read defaults from MCM Config, then overlay user changes from MCM Settings
+	ini.LoadFile("Data\\MCM\\Config\\FrameGeneration\\settings.ini");
+	ini.LoadFile("Data\\MCM\\Settings\\FrameGeneration.ini");
 
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
 	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
 
-	REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
-	REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
-	REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G)", settings.frameGenType);
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
+		REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
+		REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G)", settings.frameGenType);
+		loggedOnce = true;
+	}
+}
+
+void Upscaling::ReloadSettingsIfNeeded()
+{
+	static int frameCounter = 0;
+	if (++frameCounter % 60 != 0) return;
+	LoadSettings();
 }
 
 void Upscaling::PostPostLoad()

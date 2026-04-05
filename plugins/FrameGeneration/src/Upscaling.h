@@ -44,6 +44,7 @@ public:
 	bool setupBuffers = false;
 
 	void LoadSettings();
+	void ReloadSettingsIfNeeded();
 
 	void PostPostLoad();
 

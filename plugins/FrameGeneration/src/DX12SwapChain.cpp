@@ -215,6 +215,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	}
 
 	auto upscaling = Upscaling::GetSingleton();
+	upscaling->ReloadSettingsIfNeeded();
 
 	bool useFrameGenerationThisFrame = false;
 	bool isDLSSGFrame = false;

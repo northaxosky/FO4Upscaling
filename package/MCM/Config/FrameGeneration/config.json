@@ -1,0 +1,68 @@
+{
+	"modName": "FrameGeneration",
+	"displayName": "Frame Generation",
+	"minMcmVersion": 2,
+	"pluginRequirements": [],
+	"content": [
+		{
+			"text": "<font size='30'><p align='center'>FRAME GENERATION</p></font>",
+			"html": true,
+			"type": "text"
+		},
+		{
+			"text": "ABOUT",
+			"type": "section"
+		},
+		{
+			"text": "Frame generation inserts interpolated frames between rendered frames, effectively doubling your frame rate.",
+			"type": "text"
+		},
+		{
+			"text": "",
+			"type": "text"
+		},
+		{
+			"text": "DLSS-G requires an NVIDIA RTX 40-series or newer GPU.",
+			"type": "text"
+		},
+		{
+			"text": "",
+			"type": "text"
+		},
+		{
+			"text": "SETTINGS",
+			"type": "section"
+		},
+		{
+			"id": "bFrameGenerationMode:Settings",
+			"text": "Enable Frame Generation",
+			"type": "toggle",
+			"help": "Toggle frame generation on or off. Takes effect immediately. (Default: On)",
+			"valueOptions": {
+				"sourceType": "ModSettingBool"
+			}
+		},
+		{
+			"id": "bFrameLimitMode:Settings",
+			"text": "Frame Rate Limiter",
+			"type": "toggle",
+			"help": "Caps frame rate to your monitor's refresh rate when VSync is disabled. Prevents tearing. Takes effect immediately. (Default: On)",
+			"valueOptions": {
+				"sourceType": "ModSettingBool"
+			}
+		},
+		{
+			"id": "iFrameGenType:Settings",
+			"text": "Backend",
+			"type": "stepper",
+			"help": "FSR3 works on all GPUs. DLSS-G requires RTX 40+. Changing this requires a game restart. (Default: DLSS-G)",
+			"valueOptions": {
+				"sourceType": "ModSettingInt",
+				"options": [
+					"AMD FSR3",
+					"NVIDIA DLSS-G"
+				]
+			}
+		}
+	]
+}

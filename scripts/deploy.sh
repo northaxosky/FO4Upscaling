@@ -60,10 +60,11 @@ deploy() {
         cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/"*.dll "$DEST/Streamline/" 2>/dev/null && echo "  Shared Streamline DLLs deployed" || true
     fi
 
-    # Config files
-    cp -u "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration.ini" "$DEST/FrameGeneration.ini" 2>/dev/null || true
+    # MCM config files
     mkdir -p "$MOD_DIR/MCM/Config/Upscaling"
     cp -u "$PACKAGE_DIR/MCM/Config/Upscaling/"* "$MOD_DIR/MCM/Config/Upscaling/" 2>/dev/null || true
+    mkdir -p "$MOD_DIR/MCM/Config/FrameGeneration"
+    cp -u "$PACKAGE_DIR/MCM/Config/FrameGeneration/"* "$MOD_DIR/MCM/Config/FrameGeneration/" 2>/dev/null || true
 
     echo "=== Deploy complete ==="
 }

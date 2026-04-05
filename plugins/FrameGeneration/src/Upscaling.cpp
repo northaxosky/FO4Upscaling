@@ -122,12 +122,15 @@ void Upscaling::LoadSettings()
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
 	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
+	// MCM stepper is 0-indexed (0=2x, 1=3x, 2=4x) but we store as numFramesToGenerate (1, 2, 3)
+	settings.frameGenFrames = std::clamp((int)ini.GetLongValue("Settings", "iFrameGenFrames", 0) + 1, 1, 3);
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
 		REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
 		REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
 		REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G)", settings.frameGenType);
+		REX::INFO("[Frame Generation] iFrameGenFrames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
 		loggedOnce = true;
 	}
 }

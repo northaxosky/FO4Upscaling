@@ -63,6 +63,20 @@
 					"NVIDIA DLSS-G"
 				]
 			}
+		},
+		{
+			"id": "iFrameGenFrames:Settings",
+			"text": "Frame Multiplier (DLSS-G)",
+			"type": "stepper",
+			"help": "How many frames to generate per rendered frame. 2x works on RTX 40+. 3x/4x (Multi-Frame Gen) requires RTX 50+. Clamped to hardware max at runtime. Requires restart. (Default: 2x)",
+			"valueOptions": {
+				"sourceType": "ModSettingInt",
+				"options": [
+					"2x (1 generated)",
+					"3x (2 generated)",
+					"4x (3 generated)"
+				]
+			}
 		}
 	]
 }

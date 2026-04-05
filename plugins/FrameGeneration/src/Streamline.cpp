@@ -1,4 +1,5 @@
 #include "Streamline.h"
+#include "Upscaling.h"
 
 void StreamlineFG::LoadInterposer()
 {
@@ -52,7 +53,7 @@ bool StreamlineFG::InitStreamline()
 	pref.pathsToPlugins = pluginPaths;
 	pref.numPathsToPlugins = 1;
 
-	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
+	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureDLSS, sl::kFeatureReflex, sl::kFeaturePCL };
 	pref.featuresToLoad = features;
 	pref.numFeaturesToLoad = _countof(features);
 
@@ -96,10 +97,22 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		return false;
 	}
 
+	// Query hardware capability for MFG
+	uint32_t maxFrames = 1;
+	if (slDLSSGGetState) {
+		sl::DLSSGState state{};
+		slDLSSGGetState(viewport, state, nullptr);
+		maxFrames = state.numFramesToGenerateMax;
+	}
+
 	// Enable DLSS-G — called once at init, not per-frame
+	// Clamp requested frames to hardware max (1 on RTX 40xx, up to 3 on RTX 50xx)
+	auto upscaling = Upscaling::GetSingleton();
+	uint32_t requestedFrames = std::clamp((uint32_t)upscaling->settings.frameGenFrames, 1u, maxFrames);
+
 	sl::DLSSGOptions options{};
 	options.mode = sl::DLSSGMode::eOn;
-	options.numFramesToGenerate = 1;
+	options.numFramesToGenerate = requestedFrames;
 
 	auto result = slDLSSGSetOptions(viewport, options);
 	if (result != sl::Result::eOk) {
@@ -108,7 +121,8 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	}
 
 	featureDLSSG = true;
-	REX::INFO("[DLSSG] DLSS-G enabled");
+	REX::INFO("[DLSSG] DLSS-G enabled: {}x frame gen (requested {}, hardware max {})",
+		requestedFrames + 1, upscaling->settings.frameGenFrames, maxFrames);
 
 	// Reflex must be active when DLSS-G is on
 	if (slReflexSetOptions) {

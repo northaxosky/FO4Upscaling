@@ -121,6 +121,7 @@ void Upscaling::LoadSettings()
 
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
+	settings.debugLogging = ini.GetBoolValue("Settings", "bEnableDebugLogging", false);
 	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
 	// MCM stepper is 0-indexed (0=2x, 1=3x, 2=4x) but we store as numFramesToGenerate (1, 2, 3)
 	settings.frameGenFrames = std::clamp((int)ini.GetLongValue("Settings", "iFrameGenFrames", 0) + 1, 1, 3);

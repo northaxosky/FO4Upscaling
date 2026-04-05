@@ -32,10 +32,13 @@ bool StreamlineFG::InitStreamline()
 
 	sl::Preferences pref{};
 	pref.showConsole = false;
-	pref.logLevel = sl::LogLevel::eVerbose;
-	pref.logMessageCallback = [](sl::LogType, const char* msg) {
-		REX::INFO("[SL-INT] {}", msg);
-	};
+	auto debugLogging = Upscaling::GetSingleton()->settings.debugLogging;
+	pref.logLevel = debugLogging ? sl::LogLevel::eVerbose : sl::LogLevel::eLogTypeWarn;
+	if (debugLogging) {
+		pref.logMessageCallback = [](sl::LogType, const char* msg) {
+			REX::INFO("[SL-INT] {}", msg);
+		};
+	}
 	pref.engine = sl::EngineType::eCustom;
 	pref.engineVersion = "1.0.0";
 	pref.projectId = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4";

@@ -36,7 +36,7 @@
 		{
 			"id": "bFrameGenerationMode:Settings",
 			"text": "Enable Frame Generation",
-			"type": "toggle",
+			"type": "switcher",
 			"help": "Toggle frame generation on or off. Takes effect immediately. (Default: On)",
 			"valueOptions": {
 				"sourceType": "ModSettingBool"
@@ -45,7 +45,7 @@
 		{
 			"id": "bFrameLimitMode:Settings",
 			"text": "Frame Rate Limiter",
-			"type": "toggle",
+			"type": "switcher",
 			"help": "Caps frame rate to your monitor's refresh rate when VSync is disabled. Prevents tearing. Takes effect immediately. (Default: On)",
 			"valueOptions": {
 				"sourceType": "ModSettingBool"
@@ -77,7 +77,7 @@
 					"4x (3 generated)"
 				]
 			}
-		}
+		},
 		{
 			"text": "",
 			"type": "text"
@@ -89,7 +89,7 @@
 		{
 			"id": "bEnableDebugLogging:Settings",
 			"text": "Enable Debug Logging",
-			"type": "toggle",
+			"type": "switcher",
 			"help": "Enables verbose Streamline logging for troubleshooting. Logs go to F4SE/AAAFrameGeneration.log. Requires game restart. (Default: Off)",
 			"valueOptions": {
 				"sourceType": "ModSettingBool"

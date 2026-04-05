@@ -324,51 +324,34 @@ void Upscaling::InstallHooks()
 	}
 
 	// These hooks are not needed when using ENB because dynamic resolution is not supported
-	if (!enbLoaded) {
-		REX::INFO("[HOOK] ENB not loaded, installing 7 dynamic resolution hooks");
+	// Dynamic resolution hooks — installed regardless of ENB (render target swaps propagate through ENB's wrapper)
+	REX::INFO("[HOOK] Installing 7 dynamic resolution hooks");
 
-		REX::INFO("[HOOK] Installing DrawWorld_DeferredComposite_RenderPassImmediately hook");
-		// Fix dynamic resolution for BSDFComposite
-		{
-			constexpr std::ptrdiff_t offsets[] = { 0x8DC, 0x915, 0x915 };
-			stl::write_thunk_call<DrawWorld_DeferredComposite_RenderPassImmediately>(REL::ID({ 728427, 2318313, 2318313 }).address() + offsets[runtimeIdx]);
-		}
-
-		REX::INFO("[HOOK] Installing BSImagespaceShaderLensFlare_RenderLensFlare detour");
-		// Fix dynamic resolution for Lens Flare visibility
-		stl::detour_thunk<BSImagespaceShaderLensFlare_RenderLensFlare>(REL::ID({ 676108, 2317547, 2317547 }));
-
-		REX::INFO("[HOOK] Installing BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique hook");
-		// Fix dynamic resolution for Screenspace Reflections
-		stl::write_thunk_call<BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique>(REL::ID({ 779077, 2317302, 2317302 }).address() + 0x1C);
-
-		REX::INFO("[HOOK] Installing DrawWorld_Imagespace_RenderEffectRange hook");
-		// Fix dynamic resolution for post processing
-		{
-			constexpr std::ptrdiff_t offsets[] = { 0x9F, 0x83, 0x83 };
-			stl::write_thunk_call<DrawWorld_Imagespace_RenderEffectRange>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
-		}
-
-		REX::INFO("[HOOK] Installing ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant hook");
-		// Fix VATs line thickness
-		{
-			constexpr std::ptrdiff_t offsets[] = { 0xBB, 0x110, 0x110 };
-			stl::write_thunk_call<ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant>(REL::ID({ 1042583, 2317983, 2317983 }).address() + offsets[runtimeIdx]);
-		}
-
-		REX::INFO("[HOOK] Installing LoadingMenu_Render_UpdateTemporalData hook");
-		// Fix jitter in LoadingMenu
-		{
-			constexpr std::ptrdiff_t offsets[] = { 0x2BD, 0x275, 0x275 };
-			stl::write_thunk_call<LoadingMenu_Render_UpdateTemporalData>(REL::ID({ 135719, 2249225, 2249225 }).address() + offsets[runtimeIdx]);
-		}
-
-		REX::INFO("[HOOK] Installing DrawWorld_Imagespace detour");
-		// Fix dynamic resolution after upscaling
-		stl::detour_thunk<DrawWorld_Imagespace>(REL::ID({ 587723, 2318322, 2318322 }));
-	} else {
-		REX::INFO("[HOOK] ENB loaded, skipping 7 dynamic resolution hooks (BSDFComposite, LensFlare, SSR, PostProcessing, VATs, LoadingMenu, DrawWorld_Imagespace)");
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0x8DC, 0x915, 0x915 };
+		stl::write_thunk_call<DrawWorld_DeferredComposite_RenderPassImmediately>(REL::ID({ 728427, 2318313, 2318313 }).address() + offsets[runtimeIdx]);
 	}
+
+	stl::detour_thunk<BSImagespaceShaderLensFlare_RenderLensFlare>(REL::ID({ 676108, 2317547, 2317547 }));
+
+	stl::write_thunk_call<BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique>(REL::ID({ 779077, 2317302, 2317302 }).address() + 0x1C);
+
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0x9F, 0x83, 0x83 };
+		stl::write_thunk_call<DrawWorld_Imagespace_RenderEffectRange>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
+	}
+
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0xBB, 0x110, 0x110 };
+		stl::write_thunk_call<ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant>(REL::ID({ 1042583, 2317983, 2317983 }).address() + offsets[runtimeIdx]);
+	}
+
+	{
+		constexpr std::ptrdiff_t offsets[] = { 0x2BD, 0x275, 0x275 };
+		stl::write_thunk_call<LoadingMenu_Render_UpdateTemporalData>(REL::ID({ 135719, 2249225, 2249225 }).address() + offsets[runtimeIdx]);
+	}
+
+	stl::detour_thunk<DrawWorld_Imagespace>(REL::ID({ 587723, 2318322, 2318322 }));
 
 	REX::INFO("[HOOK] All upscaling hooks installed");
 }
@@ -972,15 +955,8 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 		currentUpscaleMethod = UpscaleMethod::kFSR;
 	}
 
-	// ENB is loaded, disable FSR
-	if (enbLoaded && currentUpscaleMethod == UpscaleMethod::kFSR) {
-		static bool loggedENBDisable = false;
-		if (!loggedENBDisable) {
-			REX::INFO("[ENB] ENB loaded, forcing FSR disable -> kDisabled");
-			loggedENBDisable = true;
-		}
-		currentUpscaleMethod = UpscaleMethod::kDisabled;
-	}
+	// ENB compatibility: FSR and DLSS work alongside ENB — render target swaps
+	// propagate through ENB's wrapper, and upscaling completes before ENB's post-processing
 
 	static bool loggedOnce = false;
 	if (!loggedOnce && !a_checkMenu) {
@@ -1121,7 +1097,7 @@ void Upscaling::UpdateUpscaling()
 
 	// Calculate render resolution scale from quality mode
 	// Example: Quality mode returns upscale ratio of ~1.5x, so resolutionScale = 1/1.5 = 0.67
-	float resolutionScale = enbLoaded || upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)settings.qualityMode);
+	float resolutionScale = upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)settings.qualityMode);
 
 	{
 		static float previousResolutionScale = -1.0f;

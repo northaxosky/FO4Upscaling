@@ -33,7 +33,7 @@ bool StreamlineFG::InitStreamline()
 	sl::Preferences pref{};
 	pref.showConsole = false;
 	auto debugLogging = Upscaling::GetSingleton()->settings.debugLogging;
-	pref.logLevel = debugLogging ? sl::LogLevel::eVerbose : sl::LogLevel::eLogTypeWarn;
+	pref.logLevel = debugLogging ? sl::LogLevel::eVerbose : sl::LogLevel::eDefault;
 	if (debugLogging) {
 		pref.logMessageCallback = [](sl::LogType, const char* msg) {
 			REX::INFO("[SL-INT] {}", msg);
@@ -56,7 +56,7 @@ bool StreamlineFG::InitStreamline()
 	pref.pathsToPlugins = pluginPaths;
 	pref.numPathsToPlugins = 1;
 
-	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureDLSS, sl::kFeatureReflex, sl::kFeaturePCL };
+	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
 	pref.featuresToLoad = features;
 	pref.numFeaturesToLoad = _countof(features);
 

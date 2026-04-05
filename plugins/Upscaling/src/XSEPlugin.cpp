@@ -113,7 +113,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 #endif
 
 	if (ENB_API::RequestENBAPI()) {
-		REX::INFO("[ENB] ENB detected - FSR will be DISABLED, 7 hooks SKIPPED");
+		REX::INFO("[ENB] ENB detected - upscaling active with ENB compatibility");
 		enbLoaded = true;
 	} else {
 		REX::INFO("[ENB] ENB not detected - full pipeline active");

@@ -18,6 +18,9 @@ decltype(&IDXGIFactory::CreateSwapChain) ptrCreateSwapChain;
 
 HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain)
 {
+	// ENB path: ENB's wrapped factory calls CreateSwapChain — we intercept to insert our D3D12 proxy
+	auto upscaling = Upscaling::GetSingleton();
+
 	IDXGIDevice* dxgiDevice = nullptr;
 	DX::ThrowIfFailed(a_device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice));
 
@@ -32,8 +35,41 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	a_device->GetImmediateContext(&context);
 	proxy->SetD3D11DeviceContext(context);
 
+	// For DLSS-G: init Streamline BEFORE D3D12 device
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		auto dlssg = StreamlineFG::GetSingleton();
+		dlssg->InitStreamline();
+	}
+
 	proxy->CreateD3D12Device(adapter);
-	proxy->CreateSwapChain((IDXGIFactory5*)This, *pDesc);
+
+	// DLSS-G: upgrade device+factory via Streamline
+	IDXGIFactory5* factory = (IDXGIFactory5*)This;
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		auto dlssg = StreamlineFG::GetSingleton();
+
+		ID3D12Device* rawDevice = proxy->d3d12Device.get();
+		dlssg->slUpgradeInterface((void**)&rawDevice);
+		proxy->d3d12Device.copy_from(rawDevice);
+
+		IDXGIFactory* rawFactory = (IDXGIFactory*)factory;
+		dlssg->slUpgradeInterface((void**)&rawFactory);
+		factory = (IDXGIFactory5*)rawFactory;
+
+		dlssg->SetD3DDevice(proxy->d3d12Device.get());
+	}
+
+	proxy->CreateD3D12CommandQueues();
+	proxy->CreateSwapChain(factory, *pDesc);
+
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		auto dlssg = StreamlineFG::GetSingleton();
+		if (!dlssg->CheckAndEnableDLSSG()) {
+			REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");
+			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+		}
+	}
+
 	proxy->CreateInterop();
 
 	*ppSwapChain = proxy->GetSwapChainProxy();

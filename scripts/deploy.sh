@@ -40,31 +40,58 @@ deploy() {
     echo "=== Deploying to mod folder ==="
     local DEST="$MOD_DIR/F4SE/Plugins"
 
-    # Frame Generation
-    cp "$FG_BUILD/AAAFrameGeneration.dll" "$DEST/AAAFrameGeneration.dll"
-    [ -f "$FG_BUILD/AAAFrameGeneration.pdb" ] && cp "$FG_BUILD/AAAFrameGeneration.pdb" "$DEST/AAAFrameGeneration.pdb"
+    # Ensure all subdirectories exist
+    mkdir -p "$DEST/Upscaling"
+    mkdir -p "$DEST/FrameGeneration/FidelityFX"
+    mkdir -p "$DEST/FrameGeneration/Streamline"
+    mkdir -p "$DEST/Streamline"
+    mkdir -p "$MOD_DIR/MCM/Config/Upscaling"
+    mkdir -p "$MOD_DIR/MCM/Config/FrameGeneration"
+
+    # Plugin DLLs (build output)
+    cp "$FG_BUILD/AAAFrameGeneration.dll" "$DEST/"
+    [ -f "$FG_BUILD/AAAFrameGeneration.pdb" ] && cp "$FG_BUILD/AAAFrameGeneration.pdb" "$DEST/"
     echo "  AAAFrameGeneration.dll deployed"
 
-    # Upscaling
-    cp "$US_BUILD/Upscaling.dll" "$DEST/Upscaling.dll"
-    [ -f "$US_BUILD/Upscaling.pdb" ] && cp "$US_BUILD/Upscaling.pdb" "$DEST/Upscaling.pdb"
+    cp "$US_BUILD/Upscaling.dll" "$DEST/"
+    [ -f "$US_BUILD/Upscaling.pdb" ] && cp "$US_BUILD/Upscaling.pdb" "$DEST/"
     echo "  Upscaling.dll deployed"
 
-    # HLSL shaders
-    cp "$PACKAGE_DIR/F4SE/Plugins/Upscaling/"*.hlsl "$DEST/Upscaling/" 2>/dev/null && echo "  Upscaling shaders deployed" || true
-    cp "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/"*.hlsl "$DEST/FrameGeneration/" 2>/dev/null && echo "  FrameGen shaders deployed" || true
+    # HLSL shaders (package)
+    cp "$PACKAGE_DIR/F4SE/Plugins/Upscaling/"*.hlsl "$DEST/Upscaling/"
+    echo "  Upscaling shaders deployed"
 
-    # Shared Streamline DLLs (used by both frame gen and upscaling)
-    if [ -d "$PACKAGE_DIR/F4SE/Plugins/Streamline" ]; then
-        mkdir -p "$DEST/Streamline"
-        cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/"*.dll "$DEST/Streamline/" 2>/dev/null && echo "  Shared Streamline DLLs deployed" || true
-    fi
+    cp "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/"*.hlsl "$DEST/FrameGeneration/"
+    echo "  FrameGen shaders deployed"
 
-    # MCM config files
-    mkdir -p "$MOD_DIR/MCM/Config/Upscaling"
+    # FidelityFX runtime DLL (package)
+    cp "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/FidelityFX/amd_fidelityfx_dx12.dll" "$DEST/FrameGeneration/FidelityFX/"
+    echo "  FidelityFX DLL deployed"
+
+    # Streamline DLLs — shared (spatial upscaling: DLSS SR)
+    cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/"*.dll "$DEST/Streamline/"
+    echo "  Shared Streamline DLLs deployed"
+
+    # Streamline DLLs — frame generation (DLSS-G interposer + frame gen)
+    for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do
+        [ -f "$PACKAGE_DIR/F4SE/Plugins/Streamline/$dll" ] && cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/$dll" "$DEST/FrameGeneration/Streamline/"
+    done
+    echo "  FrameGen Streamline DLLs deployed"
+
+    # MCM config (no-clobber: don't overwrite user changes)
     cp -u "$PACKAGE_DIR/MCM/Config/Upscaling/"* "$MOD_DIR/MCM/Config/Upscaling/" 2>/dev/null || true
-    mkdir -p "$MOD_DIR/MCM/Config/FrameGeneration"
     cp -u "$PACKAGE_DIR/MCM/Config/FrameGeneration/"* "$MOD_DIR/MCM/Config/FrameGeneration/" 2>/dev/null || true
+    echo "  MCM config deployed"
+
+    # Game asset overrides (meshes/textures)
+    if [ -d "$PACKAGE_DIR/Meshes" ]; then
+        cp -r "$PACKAGE_DIR/Meshes" "$MOD_DIR/"
+        echo "  Mesh overrides deployed"
+    fi
+    if [ -d "$PACKAGE_DIR/Textures" ]; then
+        cp -r "$PACKAGE_DIR/Textures" "$MOD_DIR/"
+        echo "  Texture overrides deployed"
+    fi
 
     echo "=== Deploy complete ==="
 }

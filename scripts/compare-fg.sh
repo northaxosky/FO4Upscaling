@@ -6,7 +6,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$SCRIPT_DIR/.env"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    source "$SCRIPT_DIR/.env"
+else
+    echo "ERROR: scripts/.env not found. Copy scripts/.env.example to scripts/.env and configure paths."
+    exit 1
+fi
+
+: "${MOD_DIR:?ERROR: MOD_DIR not set in .env}"
+: "${MO2_EXE:?ERROR: MO2_EXE not set in .env}"
+: "${MO2_PROFILE:?ERROR: MO2_PROFILE not set in .env}"
+: "${F4SE_LOG_DIR:?ERROR: F4SE_LOG_DIR not set in .env}"
 
 INI_FILE="$MOD_DIR/F4SE/Plugins/FrameGeneration.ini"
 RESULTS_DIR="$PROJECT_ROOT/test-results/compare_$(date +%Y%m%d_%H%M%S)"

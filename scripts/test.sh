@@ -12,6 +12,11 @@ else
     exit 1
 fi
 
+: "${MOD_DIR:?ERROR: MOD_DIR not set in .env}"
+: "${MO2_EXE:?ERROR: MO2_EXE not set in .env}"
+: "${MO2_PROFILE:?ERROR: MO2_PROFILE not set in .env}"
+: "${F4SE_LOG_DIR:?ERROR: F4SE_LOG_DIR not set in .env}"
+
 RESULTS_DIR="$PROJECT_ROOT/test-results/$(date +%Y%m%d_%H%M%S)"
 TIMEOUT_SECONDS=120
 STABILIZE_SECONDS=10

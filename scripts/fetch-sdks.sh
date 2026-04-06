@@ -49,7 +49,7 @@ fetch_streamline() {
     local zip="$TEMP_DIR/streamline-sdk-${STREAMLINE_VERSION}.zip"
     if [ ! -f "$zip" ]; then
         echo "  Downloading Streamline SDK ${STREAMLINE_VERSION}..."
-        curl -sL "$STREAMLINE_URL" -o "$zip"
+        curl -fSL "$STREAMLINE_URL" -o "$zip" || { echo "ERROR: Failed to download $STREAMLINE_URL"; exit 1; }
     fi
 
     mkdir -p "$STREAMLINE_DEST"
@@ -57,6 +57,7 @@ fetch_streamline() {
         unzip -jo "$zip" "bin/x64/$dll" -d "$STREAMLINE_DEST" 2>/dev/null || \
             echo "  WARNING: $dll not found in archive"
     done
+    [[ -f "$STREAMLINE_DEST/sl.interposer.dll" ]] || { echo "ERROR: sl.interposer.dll not found after extraction"; exit 1; }
     echo "  Streamline ${STREAMLINE_VERSION}: ${#STREAMLINE_DLLS[@]} DLLs extracted"
 }
 
@@ -72,11 +73,12 @@ fetch_fidelityfx() {
     local zip="$TEMP_DIR/FidelityFX-SDK-${FIDELITYFX_VERSION}.zip"
     if [ ! -f "$zip" ]; then
         echo "  Downloading FidelityFX SDK ${FIDELITYFX_VERSION}..."
-        curl -sL "$FIDELITYFX_URL" -o "$zip"
+        curl -fSL "$FIDELITYFX_URL" -o "$zip" || { echo "ERROR: Failed to download $FIDELITYFX_URL"; exit 1; }
     fi
 
     mkdir -p "$FIDELITYFX_DEST"
     unzip -jo "$zip" "PrebuiltSignedDLL/amd_fidelityfx_dx12.dll" -d "$FIDELITYFX_DEST" 2>/dev/null
+    [[ -f "$FIDELITYFX_DEST/amd_fidelityfx_dx12.dll" ]] || { echo "ERROR: amd_fidelityfx_dx12.dll not found after extraction"; exit 1; }
     echo "  FidelityFX ${FIDELITYFX_VERSION}: amd_fidelityfx_dx12.dll extracted"
 }
 
@@ -91,13 +93,13 @@ fetch_xess() {
     fi
 
     if [ ! -d "$XESS_SRC" ]; then
-        echo "  ERROR: extern/XeSS not found. Run: git submodule update --init extern/XeSS"
-        return 1
+        echo "ERROR: extern/XeSS not found. Run: git submodule update --init extern/XeSS"
+        exit 1
     fi
 
     mkdir -p "$XESS_DEST"
-    cp "$XESS_SRC/libxess_fg.dll" "$XESS_DEST/"
-    cp "$XESS_SRC/libxell.dll" "$XESS_DEST/"
+    cp "$XESS_SRC/libxess_fg.dll" "$XESS_DEST/" || { echo "ERROR: Failed to copy libxess_fg.dll"; exit 1; }
+    cp "$XESS_SRC/libxell.dll" "$XESS_DEST/" || { echo "ERROR: Failed to copy libxell.dll"; exit 1; }
     echo "  XeSS: libxess_fg.dll + libxell.dll copied from submodule"
 }
 

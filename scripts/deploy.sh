@@ -12,6 +12,10 @@ else
     exit 1
 fi
 
+: "${MOD_DIR:?ERROR: MOD_DIR not set in .env}"
+: "${VCPKG_ROOT:?ERROR: VCPKG_ROOT not set in .env}"
+[[ -d "$VCPKG_ROOT" ]] || { echo "ERROR: VCPKG_ROOT='$VCPKG_ROOT' does not exist"; exit 1; }
+
 BUILD_DIR="$PROJECT_ROOT/build"
 PACKAGE_DIR="$PROJECT_ROOT/package"
 

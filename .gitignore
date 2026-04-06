@@ -3,4 +3,10 @@
 /bin
 /test-results
 /.local
+/.sdk-cache
 scripts/.env
+
+# Third-party SDK runtime DLLs — downloaded by scripts/fetch-sdks.sh
+package/F4SE/Plugins/Streamline/*.dll
+package/F4SE/Plugins/FrameGeneration/FidelityFX/*.dll
+package/F4SE/Plugins/FrameGeneration/XeSS/*.dll

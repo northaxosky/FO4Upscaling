@@ -37,6 +37,12 @@ build() {
 }
 
 deploy() {
+    # Ensure SDK DLLs are present before deploying
+    if [ ! -f "$PACKAGE_DIR/F4SE/Plugins/Streamline/sl.interposer.dll" ]; then
+        echo "SDK DLLs missing, fetching..."
+        bash "$SCRIPT_DIR/fetch-sdks.sh"
+    fi
+
     echo "=== Deploying to mod folder ==="
     local DEST="$MOD_DIR/F4SE/Plugins"
 

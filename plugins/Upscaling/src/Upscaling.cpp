@@ -1175,11 +1175,11 @@ void Upscaling::Upscale()
 
 	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)Util::RenderTarget::kFrameBuffer].srView);
 
-	ID3D11Resource* frameBufferResource;
-	frameBufferSRV->GetResource(&frameBufferResource);
+	winrt::com_ptr<ID3D11Resource> frameBufferResource;
+	frameBufferSRV->GetResource(frameBufferResource.put());
 
 	// Copy frame buffer to upscaling texture (input for DLSS/FSR)
-	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource);
+	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource.get());
 
 	static auto gameViewport = Util::State_GetSingleton();
 	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
@@ -1190,7 +1190,7 @@ void Upscaling::Upscale()
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
 		D3D11_TEXTURE2D_DESC fbDesc{}, utDesc{};
-		static_cast<ID3D11Texture2D*>(frameBufferResource)->GetDesc(&fbDesc);
+		static_cast<ID3D11Texture2D*>(frameBufferResource.get())->GetDesc(&fbDesc);
 		upscalingTexture->resource->GetDesc(&utDesc);
 		REX::INFO("[UPSCALE] First Upscale dispatch: method={} (1=FSR, 2=DLSS), screen={}x{}, render={}x{}, jitter=({}, {}), qualityMode={}",
 			static_cast<uint>(upscaleMethod),
@@ -1216,7 +1216,12 @@ void Upscaling::Upscale()
 			ID3D11UnorderedAccessView* uavs[1] = { dilatedMotionVectorTexture->uav.get() };
 			context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
 
-			context->CSSetShader(GetDilateMotionVectorCS(), nullptr, 0);
+			auto dilateCS = GetDilateMotionVectorCS();
+			if (!dilateCS) {
+				REX::ERROR("[UPSCALE] Failed to compile DilateMotionVector compute shader");
+				return;
+			}
+			context->CSSetShader(dilateCS, nullptr, 0);
 
 			uint dispatchX = (uint)std::ceil(renderSize.x / 8.0f);
 			uint dispatchY = (uint)std::ceil(renderSize.y / 8.0f);
@@ -1244,8 +1249,7 @@ void Upscaling::Upscale()
 		FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize, settings.sharpness);
 
 	// Copy upscaled result back to the frame buffer
-	context->CopyResource(frameBufferResource, upscalingTexture->resource.get());
-	frameBufferResource->Release();
+	context->CopyResource(frameBufferResource.get(), upscalingTexture->resource.get());
 
 	static bool copyLogged = false;
 	if (!copyLogged) {

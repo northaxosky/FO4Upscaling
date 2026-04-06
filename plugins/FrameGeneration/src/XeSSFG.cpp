@@ -72,9 +72,11 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	REX::INFO("[XeSS-FG] Context created");
 
 	// Wire XeLL to XeSS-FG for latency reduction
-	xefgResult = pfn_xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
-	if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-		REX::WARN("[XeSS-FG] Failed to set latency reduction: {}", (int)xefgResult);
+	if (pfn_xefgSwapChainSetLatencyReduction) {
+		xefgResult = pfn_xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
+		if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+			REX::WARN("[XeSS-FG] Failed to set latency reduction: {}", (int)xefgResult);
+		}
 	}
 
 	// Configure logging

@@ -63,6 +63,29 @@ void Streamline::Initialize()
 	slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
 	slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
 
+	// Validate critical function pointers
+	bool missingCritical = false;
+	auto check = [&](const void* ptr, const char* name) {
+		if (!ptr) {
+			REX::ERROR("[SL] Failed to resolve: {}", name);
+			missingCritical = true;
+		}
+	};
+	check(slInit, "slInit");
+	check(slShutdown, "slShutdown");
+	check(slIsFeatureSupported, "slIsFeatureSupported");
+	check(slIsFeatureLoaded, "slIsFeatureLoaded");
+	check(slEvaluateFeature, "slEvaluateFeature");
+	check(slSetTag, "slSetTag");
+	check(slSetConstants, "slSetConstants");
+	check(slGetNewFrameToken, "slGetNewFrameToken");
+	check(slSetD3DDevice, "slSetD3DDevice");
+
+	if (missingCritical) {
+		initialized = false;
+		return;
+	}
+
 	if (alreadyInitialized) {
 		REX::INFO("[Streamline] Skipping slInit — already initialized by FrameGeneration plugin");
 		initialized = true;

@@ -37,6 +37,12 @@ build() {
 }
 
 deploy() {
+    # Ensure SDK DLLs are present before deploying
+    if [ ! -f "$PACKAGE_DIR/F4SE/Plugins/Streamline/sl.interposer.dll" ]; then
+        echo "SDK DLLs missing, fetching..."
+        bash "$SCRIPT_DIR/fetch-sdks.sh"
+    fi
+
     echo "=== Deploying to mod folder ==="
     local DEST="$MOD_DIR/F4SE/Plugins"
 
@@ -71,6 +77,14 @@ deploy() {
     # Streamline DLLs — shared (spatial upscaling: DLSS SR)
     cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/"*.dll "$DEST/Streamline/"
     echo "  Shared Streamline DLLs deployed"
+
+    # XeSS-FG DLLs (Intel frame generation)
+    mkdir -p "$DEST/FrameGeneration/XeSS"
+    for dll in libxess_fg.dll libxell.dll; do
+        [ -f "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/XeSS/$dll" ] && \
+            cp "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/XeSS/$dll" "$DEST/FrameGeneration/XeSS/"
+    done
+    echo "  XeSS-FG DLLs deployed"
 
     # Streamline DLLs — frame generation (DLSS-G interposer + frame gen)
     for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do

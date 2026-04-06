@@ -10,6 +10,7 @@
 #include <nvsdk_ngx.h>
 
 #include "ENB/ENBSeriesAPI.h"
+#include "XeSSFG.h"
 
 bool enbLoaded = false;
 
@@ -42,6 +43,15 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	}
 
 	proxy->CreateD3D12Device(adapter);
+
+	// XeSS-FG: create contexts after D3D12 device
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+		auto xess = XeSSFG::GetSingleton();
+		if (!xess->CreateContexts(proxy->d3d12Device.get())) {
+			REX::WARN("[FG] XeSS-FG context creation failed (ENB path), falling back to FSR3");
+			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+		}
+	}
 
 	// DLSS-G: upgrade device+factory via Streamline
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
@@ -117,6 +127,12 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 		if (upscaling->settings.frameGenType == 1) {
 			upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
 			hasBackend = true;
+		} else if (upscaling->settings.frameGenType == 2) {
+			auto xess = XeSSFG::GetSingleton();
+			if (xess->fgModule && xess->xellModule) {
+				upscaling->activeFrameGenType = Upscaling::FrameGenType::kXeSSFG;
+				hasBackend = true;
+			}
 		}
 
 		if (hasBackend) {
@@ -167,6 +183,15 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				}
 
 				proxy->CreateD3D12Device(adapter);
+
+				// XeSS-FG: create contexts after D3D12 device, no device/factory upgrade needed
+				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+					auto xess = XeSSFG::GetSingleton();
+					if (!xess->CreateContexts(proxy->d3d12Device.get())) {
+						REX::WARN("[FG] XeSS-FG context creation failed, falling back to FSR3");
+						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+					}
+				}
 
 				// DLSS-G: upgrade device+factory via Streamline, then set device
 				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
@@ -244,6 +269,10 @@ void DX11Hooks::Install()
 		REX::INFO("[FG] DLSS-G requested, loading Streamline interposer");
 		auto dlssg = StreamlineFG::GetSingleton();
 		dlssg->LoadInterposer();
+	} else if (upscaling->settings.frameGenType == 2) {
+		REX::INFO("[FG] XeSS-FG requested, loading XeSS libraries");
+		auto xess = XeSSFG::GetSingleton();
+		xess->LoadLibraries();
 	}
 
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);

@@ -32,6 +32,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Fetch SDK runtime DLLs
+        shell: bash
+        run: bash scripts/fetch-sdks.sh
+
       - name: Package mod
         shell: bash
         run: |

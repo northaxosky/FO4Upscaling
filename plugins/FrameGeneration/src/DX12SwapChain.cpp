@@ -6,6 +6,7 @@
 #include "FidelityFX.h"
 #include "Streamline.h"
 #include "Upscaling.h"
+#include "XeSSFG.h"
 
 extern bool enbLoaded;
 
@@ -69,6 +70,12 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
+	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+		if (!CreateSwapChainXeSS(a_dxgiFactory, a_swapChainDesc)) {
+			REX::WARN("[FG] XeSS-FG swap chain failed, falling back to FSR3");
+			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+			CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
+		}
 	} else {
 		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 	}
@@ -120,6 +127,19 @@ void DX12SwapChain::CreateSwapChainDLSSG(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP
 	DX::ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain)));
 
 	REX::INFO("[DLSSG] D3D12 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+}
+
+bool DX12SwapChain::CreateSwapChainXeSS(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	REX::INFO("[XeSS-FG] Creating XeSS-FG proxy swap chain");
+
+	auto xess = XeSSFG::GetSingleton();
+	if (!xess->InitSwapChain(commandQueue.get(), a_dxgiFactory, swapChainDesc, a_swapChainDesc.OutputWindow, &swapChain)) {
+		return false;
+	}
+
+	REX::INFO("[XeSS-FG] Swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+	return true;
 }
 
 void DX12SwapChain::CreateInterop()
@@ -219,6 +239,8 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	bool useFrameGenerationThisFrame = false;
 	bool isDLSSGFrame = false;
+	bool isXeSSFrame = false;
+	static uint32_t xessFrameId = 0;
 
 	if (auto main = RE::Main::GetSingleton())
 		if (auto ui = RE::UI::GetSingleton())
@@ -274,6 +296,76 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			cameraNear, cameraFar, camera);
 
 		isDLSSGFrame = true;
+	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+		auto xess = XeSSFG::GetSingleton();
+		if (xess->initialized && useFrameGenerationThisFrame) {
+			// 1. Pacing + simulation start
+			xess->BeginFrame(xessFrameId);
+
+			// 2. Gather camera data
+			static auto gameViewport = State_GetSingleton();
+			auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+
+			float2 jitter;
+			jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
+			jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
+
+			// XeSS-FG wants jitter in [-0.5, 0.5] range (pixel-normalized)
+			float2 jitterNorm;
+			jitterNorm.x = -gameViewport->offsetX / 2.0f;
+			jitterNorm.y = gameViewport->offsetY / 2.0f;
+
+			// Frame time delta
+			static LARGE_INTEGER frequency = []() {
+				LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f;
+			}();
+			static LARGE_INTEGER lastXeSSFrame = []() {
+				LARGE_INTEGER t; QueryPerformanceCounter(&t); return t;
+			}();
+			LARGE_INTEGER currentTime;
+			QueryPerformanceCounter(&currentTime);
+			float deltaMs = static_cast<float>(currentTime.QuadPart - lastXeSSFrame.QuadPart) /
+				static_cast<float>(frequency.QuadPart) * 1000.0f;
+			lastXeSSFrame = currentTime;
+
+			// Extract row-major view and projection matrices
+			auto& camView = gameViewport->cameraState.camViewData;
+			alignas(16) float viewMat[16];
+			alignas(16) float projMat[16];
+			for (int i = 0; i < 4; i++) {
+				_mm_store_ps(&viewMat[i * 4], camView.viewMat[i]);
+				// Derive unjittered projection: inv(view) * viewProjUnjittered
+				// For XeSS-FG we pass view and projection separately
+			}
+			// Use viewProjUnjittered and inverse view to get projection
+			// projMat = inv(viewMat) * viewProjUnjittered
+			DirectX::XMMATRIX view = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewMat);
+			DirectX::XMMATRIX vpUnjittered = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewProjUnjittered);
+			DirectX::XMMATRIX invView = DirectX::XMMatrixInverse(nullptr, view);
+			DirectX::XMMATRIX proj = DirectX::XMMatrixMultiply(invView, vpUnjittered);
+			DirectX::XMStoreFloat4x4((DirectX::XMFLOAT4X4*)projMat, proj);
+
+			xess->SetMarker(XELL_SIMULATION_END, xessFrameId);
+
+			// 3. Tag resources + constants
+			xess->TagResources(xessFrameId,
+				commandLists[frameIndex].get(),
+				upscaling->depthBufferShared12[frameIndex].get(),
+				upscaling->motionVectorBufferShared12[frameIndex].get(),
+				screenSize, jitterNorm,
+				float2(screenSize.x, screenSize.y),
+				deltaMs, viewMat, projMat, false);
+
+			isXeSSFrame = true;
+		} else if (xess->initialized) {
+			// FG disabled this frame (menu/pause) but XeSS is the backend
+			xefgSwapChainSetEnabled(xess->xefgCtx, 0);
+		}
+
+		if (xess->initialized && useFrameGenerationThisFrame)
+			xefgSwapChainSetEnabled(xess->xefgCtx, 1);
+
+		xessFrameId++;
 	} else {
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
 	}
@@ -282,22 +374,26 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	// Bracket GPU work submission with render markers
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_START, xessFrameId - 1);
 
 	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
 	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
 
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_END, xessFrameId - 1);
 
 	// Fix FPS cap being e.g. 55 instead of 60
 	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
-	// Bracket Present with markers — ePresentStart sets kMarkerPresentFrame for DLSS-G
+	// Bracket Present with markers
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_START, xessFrameId - 1);
 
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
 
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
 	// Wait for previous frame to have finished
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
@@ -314,7 +410,8 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		upscaling->GameFrameLimiter();
 
 	// If VSync is disabled, use frame limiter to prevent tearing and optimize pacing
-	if (SyncInterval == 0)
+	// XeLL handles pacing for XeSS-FG, skip custom limiter
+	if (SyncInterval == 0 && !isXeSSFrame)
 		upscaling->FrameLimiter(useFrameGenerationThisFrame);
 
 	return S_OK;

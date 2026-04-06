@@ -55,12 +55,13 @@
 			"id": "iFrameGenType:Settings",
 			"text": "Backend",
 			"type": "stepper",
-			"help": "FSR3 works on all GPUs. DLSS-G requires RTX 40+. Changing this requires a game restart. (Default: DLSS-G)",
+			"help": "FSR3 works on all GPUs. DLSS-G requires RTX 40+. XeSS-FG works on any modern GPU (best on Intel Arc). Changing this requires a game restart. (Default: DLSS-G)",
 			"valueOptions": {
 				"sourceType": "ModSettingInt",
 				"options": [
 					"AMD FSR3",
-					"NVIDIA DLSS-G"
+					"NVIDIA DLSS-G",
+					"Intel XeSS-FG"
 				]
 			}
 		},

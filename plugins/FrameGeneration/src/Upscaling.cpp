@@ -130,7 +130,7 @@ void Upscaling::LoadSettings()
 	if (!loggedOnce) {
 		REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
 		REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
-		REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G)", settings.frameGenType);
+		REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
 		REX::INFO("[Frame Generation] iFrameGenFrames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
 		loggedOnce = true;
 	}

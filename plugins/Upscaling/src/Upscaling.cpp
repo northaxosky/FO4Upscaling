@@ -784,16 +784,16 @@ void Upscaling::UpdateSamplerStates(float a_currentMipBias)
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
+	static float previousMipBias = 1.0f;
+	static bool firstCall = true;
+
+	if (!firstCall && previousMipBias == a_currentMipBias)
+		return;
+	firstCall = false;
+
 	// Store original sampler states from the game
-	// These will be used to restore the original states later
 	for (int a = 0; a < 320; a++)
 		originalSamplerStates[a] = samplerStates->a[a];
-
-	static float previousMipBias = 1.0f;
-
-	// Check if mip bias has changed - only recreate sampler states if needed
-	if (previousMipBias == a_currentMipBias)
-		return;
 
 	REX::INFO("[SAMPLER] Mip bias changed: {:.4f} -> {:.4f}", previousMipBias, a_currentMipBias);
 	previousMipBias = a_currentMipBias;

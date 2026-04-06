@@ -298,74 +298,68 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		isDLSSGFrame = true;
 	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
-		if (xess->initialized && useFrameGenerationThisFrame) {
-			// 1. Pacing + simulation start
+		if (xess->initialized) {
+			// Toggle enable only on state changes
+			static bool xessFGWasEnabled = false;
+			if (useFrameGenerationThisFrame != xessFGWasEnabled) {
+				xess->SetEnabled(useFrameGenerationThisFrame ? 1 : 0);
+				xessFGWasEnabled = useFrameGenerationThisFrame;
+			}
+
+			// Per-frame work regardless of FG state (XeLL markers still needed)
 			xess->BeginFrame(xessFrameId);
 
-			// 2. Gather camera data
-			static auto gameViewport = State_GetSingleton();
-			auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+			if (useFrameGenerationThisFrame) {
+				static auto gameViewport = State_GetSingleton();
+				auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 
-			float2 jitter;
-			jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
-			jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
+				// XeSS-FG wants jitter in [-0.5, 0.5] range (pixel-normalized)
+				float2 jitterNorm;
+				jitterNorm.x = -gameViewport->offsetX / 2.0f;
+				jitterNorm.y = gameViewport->offsetY / 2.0f;
 
-			// XeSS-FG wants jitter in [-0.5, 0.5] range (pixel-normalized)
-			float2 jitterNorm;
-			jitterNorm.x = -gameViewport->offsetX / 2.0f;
-			jitterNorm.y = gameViewport->offsetY / 2.0f;
+				// Frame time delta
+				static LARGE_INTEGER frequency = []() {
+					LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f;
+				}();
+				static LARGE_INTEGER lastXeSSFrame = []() {
+					LARGE_INTEGER t; QueryPerformanceCounter(&t); return t;
+				}();
+				LARGE_INTEGER currentTime;
+				QueryPerformanceCounter(&currentTime);
+				float deltaMs = static_cast<float>(currentTime.QuadPart - lastXeSSFrame.QuadPart) /
+					static_cast<float>(frequency.QuadPart) * 1000.0f;
+				lastXeSSFrame = currentTime;
 
-			// Frame time delta
-			static LARGE_INTEGER frequency = []() {
-				LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f;
-			}();
-			static LARGE_INTEGER lastXeSSFrame = []() {
-				LARGE_INTEGER t; QueryPerformanceCounter(&t); return t;
-			}();
-			LARGE_INTEGER currentTime;
-			QueryPerformanceCounter(&currentTime);
-			float deltaMs = static_cast<float>(currentTime.QuadPart - lastXeSSFrame.QuadPart) /
-				static_cast<float>(frequency.QuadPart) * 1000.0f;
-			lastXeSSFrame = currentTime;
+				// Extract row-major view and projection matrices
+				auto& camView = gameViewport->cameraState.camViewData;
+				alignas(16) float viewMat[16];
+				alignas(16) float projMat[16];
+				for (int i = 0; i < 4; i++)
+					_mm_store_ps(&viewMat[i * 4], camView.viewMat[i]);
 
-			// Extract row-major view and projection matrices
-			auto& camView = gameViewport->cameraState.camViewData;
-			alignas(16) float viewMat[16];
-			alignas(16) float projMat[16];
-			for (int i = 0; i < 4; i++) {
-				_mm_store_ps(&viewMat[i * 4], camView.viewMat[i]);
-				// Derive unjittered projection: inv(view) * viewProjUnjittered
-				// For XeSS-FG we pass view and projection separately
+				DirectX::XMMATRIX view = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewMat);
+				DirectX::XMMATRIX vpUnjittered = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewProjUnjittered);
+				DirectX::XMMATRIX invView = DirectX::XMMatrixInverse(nullptr, view);
+				DirectX::XMMATRIX proj = DirectX::XMMatrixMultiply(invView, vpUnjittered);
+				DirectX::XMStoreFloat4x4((DirectX::XMFLOAT4X4*)projMat, proj);
+
+				xess->SetMarker(XELL_SIMULATION_END, xessFrameId);
+
+				xess->TagResources(xessFrameId,
+					commandLists[frameIndex].get(),
+					upscaling->depthBufferShared12[frameIndex].get(),
+					upscaling->motionVectorBufferShared12[frameIndex].get(),
+					screenSize, jitterNorm,
+					float2(screenSize.x, screenSize.y),
+					deltaMs, viewMat, projMat, false);
+			} else {
+				xess->SetMarker(XELL_SIMULATION_END, xessFrameId);
 			}
-			// Use viewProjUnjittered and inverse view to get projection
-			// projMat = inv(viewMat) * viewProjUnjittered
-			DirectX::XMMATRIX view = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewMat);
-			DirectX::XMMATRIX vpUnjittered = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewProjUnjittered);
-			DirectX::XMMATRIX invView = DirectX::XMMatrixInverse(nullptr, view);
-			DirectX::XMMATRIX proj = DirectX::XMMatrixMultiply(invView, vpUnjittered);
-			DirectX::XMStoreFloat4x4((DirectX::XMFLOAT4X4*)projMat, proj);
-
-			xess->SetMarker(XELL_SIMULATION_END, xessFrameId);
-
-			// 3. Tag resources + constants
-			xess->TagResources(xessFrameId,
-				commandLists[frameIndex].get(),
-				upscaling->depthBufferShared12[frameIndex].get(),
-				upscaling->motionVectorBufferShared12[frameIndex].get(),
-				screenSize, jitterNorm,
-				float2(screenSize.x, screenSize.y),
-				deltaMs, viewMat, projMat, false);
 
 			isXeSSFrame = true;
-		} else if (xess->initialized) {
-			// FG disabled this frame (menu/pause) but XeSS is the backend
-			xefgSwapChainSetEnabled(xess->xefgCtx, 0);
+			xessFrameId++;
 		}
-
-		if (xess->initialized && useFrameGenerationThisFrame)
-			xefgSwapChainSetEnabled(xess->xefgCtx, 1);
-
-		xessFrameId++;
 	} else {
 		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
 	}
@@ -396,8 +390,11 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
 	// Wait for previous frame to have finished
-	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
-	WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
+	// XeLL handles pacing for XeSS-FG — skip DXGI waitable to avoid double-pacing stutter
+	if (!isXeSSFrame) {
+		auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
+		WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
+	}
 
 	// Update the frame index
 	frameIndex = swapChain->GetCurrentBackBufferIndex();

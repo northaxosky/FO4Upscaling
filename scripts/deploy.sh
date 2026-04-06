@@ -38,7 +38,9 @@ build() {
 
 deploy() {
     # Ensure SDK DLLs are present before deploying
-    if [ ! -f "$PACKAGE_DIR/F4SE/Plugins/Streamline/sl.interposer.dll" ]; then
+    if [ ! -f "$PACKAGE_DIR/F4SE/Plugins/Streamline/sl.interposer.dll" ] || \
+       [ ! -f "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/FidelityFX/amd_fidelityfx_dx12.dll" ] || \
+       [ ! -f "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/XeSS/libxess_fg.dll" ]; then
         echo "SDK DLLs missing, fetching..."
         bash "$SCRIPT_DIR/fetch-sdks.sh"
     fi

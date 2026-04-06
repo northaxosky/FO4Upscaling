@@ -37,6 +37,4 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 	Streamline
 	${CMAKE_SOURCE_DIR}/extern/Streamline/external/ngx-sdk/lib/Windows_x86_64/nvsdk_ngx_d.lib
 	XeSS
-	${CMAKE_SOURCE_DIR}/extern/XeSS/lib/libxess_fg.lib
-	${CMAKE_SOURCE_DIR}/extern/XeSS/lib/libxell.lib
 )

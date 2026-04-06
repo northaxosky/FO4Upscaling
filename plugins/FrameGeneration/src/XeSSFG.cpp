@@ -1,6 +1,8 @@
 #include "XeSSFG.h"
 #include "Upscaling.h"
 
+#define LOAD_FN(module, name) pfn_##name = reinterpret_cast<decltype(&name)>(GetProcAddress(module, #name))
+
 bool XeSSFG::LoadLibraries()
 {
 	fgModule = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\XeSS\\libxess_fg.dll");
@@ -17,34 +19,60 @@ bool XeSSFG::LoadLibraries()
 		return false;
 	}
 
-	REX::INFO("[XeSS-FG] Libraries loaded");
+	// Resolve XeLL functions
+	LOAD_FN(xellModule, xellD3D12CreateContext);
+	LOAD_FN(xellModule, xellDestroyContext);
+	LOAD_FN(xellModule, xellSetSleepMode);
+	LOAD_FN(xellModule, xellSleep);
+	LOAD_FN(xellModule, xellAddMarkerData);
+	LOAD_FN(xellModule, xellSetLoggingCallback);
+
+	// Resolve XeSS-FG functions
+	LOAD_FN(fgModule, xefgSwapChainD3D12CreateContext);
+	LOAD_FN(fgModule, xefgSwapChainSetLatencyReduction);
+	LOAD_FN(fgModule, xefgSwapChainSetLoggingCallback);
+	LOAD_FN(fgModule, xefgSwapChainD3D12InitFromSwapChainDesc);
+	LOAD_FN(fgModule, xefgSwapChainD3D12GetSwapChainPtr);
+	LOAD_FN(fgModule, xefgSwapChainSetEnabled);
+	LOAD_FN(fgModule, xefgSwapChainGetProperties);
+	LOAD_FN(fgModule, xefgSwapChainD3D12TagFrameResource);
+	LOAD_FN(fgModule, xefgSwapChainTagFrameConstants);
+	LOAD_FN(fgModule, xefgSwapChainSetPresentId);
+	LOAD_FN(fgModule, xefgSwapChainDestroy);
+
+	if (!pfn_xellD3D12CreateContext || !pfn_xefgSwapChainD3D12CreateContext) {
+		REX::WARN("[XeSS-FG] Failed to resolve required function pointers");
+		return false;
+	}
+
+	REX::INFO("[XeSS-FG] Libraries loaded, functions resolved");
 	return true;
 }
+
+#undef LOAD_FN
 
 bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 {
 	if (!fgModule || !xellModule) return false;
 
-	// Create XeLL context first (required by XeSS-FG)
-	auto xellResult = xellD3D12CreateContext(a_device, &xellCtx);
+	auto xellResult = pfn_xellD3D12CreateContext(a_device, &xellCtx);
 	if (xellResult != XELL_RESULT_SUCCESS) {
 		REX::WARN("[XeSS-FG] XeLL context creation failed: {}", (int)xellResult);
 		return false;
 	}
 	REX::INFO("[XeSS-FG] XeLL context created");
 
-	// Create XeSS-FG context
-	auto xefgResult = xefgSwapChainD3D12CreateContext(a_device, &xefgCtx);
+	auto xefgResult = pfn_xefgSwapChainD3D12CreateContext(a_device, &xefgCtx);
 	if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 		REX::WARN("[XeSS-FG] Context creation failed: {}", (int)xefgResult);
-		xellDestroyContext(xellCtx);
+		pfn_xellDestroyContext(xellCtx);
 		xellCtx = nullptr;
 		return false;
 	}
 	REX::INFO("[XeSS-FG] Context created");
 
 	// Wire XeLL to XeSS-FG for latency reduction
-	xefgResult = xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
+	xefgResult = pfn_xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
 	if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 		REX::WARN("[XeSS-FG] Failed to set latency reduction: {}", (int)xefgResult);
 	}
@@ -52,29 +80,36 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	// Configure logging
 	auto debugLogging = Upscaling::GetSingleton()->settings.debugLogging;
 	if (debugLogging) {
-		xefgSwapChainSetLoggingCallback(xefgCtx,
-			XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG,
-			[](const char* msg, xefg_swapchain_logging_level_t, void*) {
-				REX::INFO("[XeSS-INT] {}", msg);
-			}, nullptr);
-
-		xellSetLoggingCallback(xellCtx,
-			XELL_LOGGING_LEVEL_DEBUG,
-			[](const char* msg, xell_logging_level_t) {
-				REX::INFO("[XeLL-INT] {}", msg);
-			});
+		if (pfn_xefgSwapChainSetLoggingCallback) {
+			pfn_xefgSwapChainSetLoggingCallback(xefgCtx,
+				XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG,
+				[](const char* msg, xefg_swapchain_logging_level_t, void*) {
+					REX::INFO("[XeSS-INT] {}", msg);
+				}, nullptr);
+		}
+		if (pfn_xellSetLoggingCallback) {
+			pfn_xellSetLoggingCallback(xellCtx,
+				XELL_LOGGING_LEVEL_DEBUG,
+				[](const char* msg, xell_logging_level_t) {
+					REX::INFO("[XeLL-INT] {}", msg);
+				});
+		}
 	}
 
 	// Enable XeLL low latency mode
-	xell_sleep_params_t sleepParams{};
-	sleepParams.bLowLatencyMode = 1;
-	sleepParams.minimumIntervalUs = 0;
-	xellSetSleepMode(xellCtx, &sleepParams);
+	if (pfn_xellSetSleepMode) {
+		xell_sleep_params_t sleepParams{};
+		sleepParams.bLowLatencyMode = 1;
+		sleepParams.minimumIntervalUs = 0;
+		pfn_xellSetSleepMode(xellCtx, &sleepParams);
+	}
 
 	// Query max supported interpolations
-	xefg_swapchain_properties_t props{};
-	if (xefgSwapChainGetProperties(xefgCtx, &props) == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-		REX::INFO("[XeSS-FG] Max supported interpolations: {}", props.maxSupportedInterpolations);
+	if (pfn_xefgSwapChainGetProperties) {
+		xefg_swapchain_properties_t props{};
+		if (pfn_xefgSwapChainGetProperties(xefgCtx, &props) == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+			REX::INFO("[XeSS-FG] Max supported interpolations: {}", props.maxSupportedInterpolations);
+		}
 	}
 
 	return true;
@@ -83,7 +118,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_factory,
 	const DXGI_SWAP_CHAIN_DESC1& a_desc, HWND a_hwnd, IDXGISwapChain4** a_outSwapChain)
 {
-	if (!xefgCtx) return false;
+	if (!xefgCtx || !pfn_xefgSwapChainD3D12InitFromSwapChainDesc) return false;
 
 	xefg_swapchain_d3d12_init_params_t initParams{};
 	initParams.pApplicationSwapChain = nullptr;
@@ -98,7 +133,7 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 	initParams.pPipelineLibrary = nullptr;
 	initParams.uiMode = XEFG_SWAPCHAIN_UI_MODE_AUTO;
 
-	auto result = xefgSwapChainD3D12InitFromSwapChainDesc(
+	auto result = pfn_xefgSwapChainD3D12InitFromSwapChainDesc(
 		xefgCtx, a_hwnd, &a_desc, nullptr,
 		a_cmdQueue, (IDXGIFactory2*)a_factory, &initParams);
 
@@ -107,14 +142,14 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 		return false;
 	}
 
-	result = xefgSwapChainD3D12GetSwapChainPtr(xefgCtx, IID_PPV_ARGS(a_outSwapChain));
+	result = pfn_xefgSwapChainD3D12GetSwapChainPtr(xefgCtx, IID_PPV_ARGS(a_outSwapChain));
 	if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 		REX::WARN("[XeSS-FG] Failed to get proxy swap chain: {}", (int)result);
 		return false;
 	}
 
 	// Enable frame generation
-	xefgSwapChainSetEnabled(xefgCtx, 1);
+	pfn_xefgSwapChainSetEnabled(xefgCtx, 1);
 
 	initialized = true;
 	REX::INFO("[XeSS-FG] Initialized and enabled");
@@ -123,16 +158,16 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 
 void XeSSFG::BeginFrame(uint32_t a_frameId)
 {
-	if (!xellCtx) return;
+	if (!xellCtx || !pfn_xellSleep) return;
 
-	xellSleep(xellCtx, a_frameId);
-	xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
+	pfn_xellSleep(xellCtx, a_frameId);
+	pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
 }
 
 void XeSSFG::SetMarker(xell_latency_marker_type_t a_marker, uint32_t a_frameId)
 {
-	if (!xellCtx) return;
-	xellAddMarkerData(xellCtx, a_frameId, a_marker);
+	if (!xellCtx || !pfn_xellAddMarkerData) return;
+	pfn_xellAddMarkerData(xellCtx, a_frameId, a_marker);
 }
 
 void XeSSFG::TagResources(uint32_t a_frameId,
@@ -147,7 +182,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 	if (!xefgCtx) return;
 
 	// Tag depth
-	if (a_depth) {
+	if (a_depth && pfn_xefgSwapChainD3D12TagFrameResource) {
 		xefg_swapchain_d3d12_resource_data_t depthData{};
 		depthData.type = XEFG_SWAPCHAIN_RES_DEPTH;
 		depthData.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
@@ -155,11 +190,11 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		depthData.resourceSize = { (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
 		depthData.pResource = a_depth;
 		depthData.incomingState = D3D12_RESOURCE_STATE_COMMON;
-		xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
+		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
 	}
 
 	// Tag motion vectors
-	if (a_motionVectors) {
+	if (a_motionVectors && pfn_xefgSwapChainD3D12TagFrameResource) {
 		xefg_swapchain_d3d12_resource_data_t mvData{};
 		mvData.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
 		mvData.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
@@ -167,38 +202,47 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		mvData.resourceSize = { (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
 		mvData.pResource = a_motionVectors;
 		mvData.incomingState = D3D12_RESOURCE_STATE_COMMON;
-		xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &mvData);
+		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &mvData);
 	}
 
 	// Tag frame constants
-	xefg_swapchain_frame_constant_data_t constants{};
+	if (pfn_xefgSwapChainTagFrameConstants) {
+		xefg_swapchain_frame_constant_data_t constants{};
 
-	if (a_viewMatrix)
-		memcpy(constants.viewMatrix, a_viewMatrix, sizeof(float) * 16);
-	if (a_projMatrix)
-		memcpy(constants.projectionMatrix, a_projMatrix, sizeof(float) * 16);
+		if (a_viewMatrix)
+			memcpy(constants.viewMatrix, a_viewMatrix, sizeof(float) * 16);
+		if (a_projMatrix)
+			memcpy(constants.projectionMatrix, a_projMatrix, sizeof(float) * 16);
 
-	constants.jitterOffsetX = a_jitter.x;
-	constants.jitterOffsetY = a_jitter.y;
-	constants.motionVectorScaleX = a_mvScale.x;
-	constants.motionVectorScaleY = a_mvScale.y;
-	constants.resetHistory = a_reset ? 1u : 0u;
-	constants.frameRenderTime = a_frameTimeDelta;
+		constants.jitterOffsetX = a_jitter.x;
+		constants.jitterOffsetY = a_jitter.y;
+		constants.motionVectorScaleX = a_mvScale.x;
+		constants.motionVectorScaleY = a_mvScale.y;
+		constants.resetHistory = a_reset ? 1u : 0u;
+		constants.frameRenderTime = a_frameTimeDelta;
 
-	xefgSwapChainTagFrameConstants(xefgCtx, a_frameId, &constants);
+		pfn_xefgSwapChainTagFrameConstants(xefgCtx, a_frameId, &constants);
+	}
 
 	// Set present ID
-	xefgSwapChainSetPresentId(xefgCtx, a_frameId);
+	if (pfn_xefgSwapChainSetPresentId)
+		pfn_xefgSwapChainSetPresentId(xefgCtx, a_frameId);
+}
+
+void XeSSFG::SetEnabled(uint32_t a_enabled)
+{
+	if (xefgCtx && pfn_xefgSwapChainSetEnabled)
+		pfn_xefgSwapChainSetEnabled(xefgCtx, a_enabled);
 }
 
 void XeSSFG::Shutdown()
 {
-	if (xefgCtx) {
-		xefgSwapChainDestroy(xefgCtx);
+	if (xefgCtx && pfn_xefgSwapChainDestroy) {
+		pfn_xefgSwapChainDestroy(xefgCtx);
 		xefgCtx = nullptr;
 	}
-	if (xellCtx) {
-		xellDestroyContext(xellCtx);
+	if (xellCtx && pfn_xellDestroyContext) {
+		pfn_xellDestroyContext(xellCtx);
 		xellCtx = nullptr;
 	}
 	initialized = false;

@@ -74,11 +74,11 @@ function(configure_xse_plugin TARGET_NAME MAJOR MINOR PATCH)
 			/arch:AVX
 		)
 
-		target_compile_options(${TARGET_NAME} PUBLIC "$<$<CONFIG:DEBUG>:/fp:strict>")
-		target_compile_options(${TARGET_NAME} PUBLIC "$<$<CONFIG:DEBUG>:/ZI>")
-		target_compile_options(${TARGET_NAME} PUBLIC "$<$<CONFIG:DEBUG>:/Od>")
-		target_compile_options(${TARGET_NAME} PUBLIC "$<$<CONFIG:DEBUG>:/Gy>")
-		target_compile_options(${TARGET_NAME} PUBLIC "$<$<CONFIG:RELEASE>:${SC_RELEASE_OPTS}>")
+		target_compile_options(${TARGET_NAME} PRIVATE "$<$<CONFIG:DEBUG>:/fp:strict>")
+		target_compile_options(${TARGET_NAME} PRIVATE "$<$<CONFIG:DEBUG>:/ZI>")
+		target_compile_options(${TARGET_NAME} PRIVATE "$<$<CONFIG:DEBUG>:/Od>")
+		target_compile_options(${TARGET_NAME} PRIVATE "$<$<CONFIG:DEBUG>:/Gy>")
+		target_compile_options(${TARGET_NAME} PRIVATE "$<$<CONFIG:RELEASE>:${SC_RELEASE_OPTS}>")
 
 		target_link_options(${TARGET_NAME} PRIVATE
 			/WX

@@ -7,7 +7,7 @@
 class Upscaling
 {
 public:
-	enum class FrameGenType : int { kFSR3 = 0, kDLSSG = 1 };
+	enum class FrameGenType : int { kFSR3 = 0, kDLSSG = 1, kXeSSFG = 2 };
 
 	static Upscaling* GetSingleton()
 	{
@@ -20,7 +20,7 @@ public:
 		bool frameGenerationMode = 1;
 		bool frameLimitMode = 1;
 		bool debugLogging = false;
-		int frameGenType = 0;    // 0=FSR3, 1=DLSS-G
+		int frameGenType = 0;    // 0=FSR3, 1=DLSS-G, 2=XeSS-FG
 		int frameGenFrames = 1;  // 1=2x, 2=3x, 3=4x (MFG, RTX 50+ only)
 	};
 

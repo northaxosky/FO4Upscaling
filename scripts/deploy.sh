@@ -72,6 +72,14 @@ deploy() {
     cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/"*.dll "$DEST/Streamline/"
     echo "  Shared Streamline DLLs deployed"
 
+    # XeSS-FG DLLs (Intel frame generation)
+    mkdir -p "$DEST/FrameGeneration/XeSS"
+    for dll in libxess_fg.dll libxell.dll; do
+        [ -f "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/XeSS/$dll" ] && \
+            cp "$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/XeSS/$dll" "$DEST/FrameGeneration/XeSS/"
+    done
+    echo "  XeSS-FG DLLs deployed"
+
     # Streamline DLLs — frame generation (DLSS-G interposer + frame gen)
     for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do
         [ -f "$PACKAGE_DIR/F4SE/Plugins/Streamline/$dll" ] && cp "$PACKAGE_DIR/F4SE/Plugins/Streamline/$dll" "$DEST/FrameGeneration/Streamline/"

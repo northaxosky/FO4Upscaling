@@ -8,22 +8,20 @@ Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearM
 
 | Plugin | DLL | Description |
 |--------|-----|-------------|
-| **AAAFrameGeneration** | `AAAFrameGeneration.dll` | Frame generation with FSR3 (AMD) and DLSS-G (NVIDIA RTX 40+) via D3D11/D3D12 interop |
+| **AAAFrameGeneration** | `AAAFrameGeneration.dll` | Frame generation with FSR3 (AMD), DLSS-G (NVIDIA RTX 40+), and XeSS-FG (Intel/cross-vendor) via D3D11/D3D12 interop |
 | **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline |
 
 ## Frame Generation
 
-The FrameGeneration plugin supports two backends, configurable via `FrameGeneration.ini`:
+The FrameGeneration plugin supports three backends, configurable via MCM or `FrameGeneration.ini`:
 
 | Backend | Setting | GPU Requirement | Description |
 |---------|---------|-----------------|-------------|
 | **FSR3** | `iFrameGenType=0` | Any GPU | AMD FidelityFX frame interpolation |
 | **DLSS-G** | `iFrameGenType=1` | NVIDIA RTX 40+ | NVIDIA DLSS Frame Generation via Streamline SDK |
+| **XeSS-FG** | `iFrameGenType=2` | Any SM 6.4 GPU | Intel XeSS Frame Generation (multi-frame on Intel Arc) |
 
-DLSS-G integration uses the NVIDIA Streamline SDK with:
-- D3D11-to-D3D12 interop (game renders D3D11, frame gen runs D3D12)
-- Reflex low-latency markers for frame pacing
-- Automatic swap chain management via Streamline's manual hooking API
+All backends use D3D11-to-D3D12 interop (game renders D3D11, frame gen runs D3D12). If the selected backend isn't available at runtime, it falls back to FSR3 automatically.
 
 ## Requirements
 
@@ -42,6 +40,7 @@ DLSS-G integration uses the NVIDIA Streamline SDK with:
 ```bash
 git clone --recursive https://github.com/northaxosky/FO4Upscaling.git
 cd FO4Upscaling
+bash scripts/fetch-sdks.sh      # Download third-party runtime DLLs
 cmake -S . --preset=default
 cmake --build build --config Release
 ```
@@ -49,6 +48,18 @@ cmake --build build --config Release
 Output:
 - `build/plugins/FrameGeneration/Release/AAAFrameGeneration.dll`
 - `build/plugins/Upscaling/Release/Upscaling.dll`
+
+## SDK Runtime DLLs
+
+Third-party runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS) are not stored in git. Run `scripts/fetch-sdks.sh` after cloning to download them from official GitHub releases:
+
+| SDK | Version | DLLs | Source |
+|-----|---------|------|--------|
+| NVIDIA Streamline | v2.10.3 | sl.interposer, sl.dlss_g, sl.reflex, etc. | [GitHub release](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.3) |
+| AMD FidelityFX | v1.1.4 | amd_fidelityfx_dx12.dll | [GitHub release](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/v1.1.4) |
+| Intel XeSS | submodule | libxess_fg.dll, libxell.dll | Copied from `extern/XeSS/bin/` |
+
+The deploy script auto-fetches if DLLs are missing. Downloaded archives are cached in `.sdk-cache/`.
 
 ## Scripts
 
@@ -78,19 +89,22 @@ Results are saved to `test-results/<timestamp>/` with logs, screenshots, and a p
 
 ```
 plugins/
-  FrameGeneration/       # AAAFrameGeneration target (FSR3 + DLSS-G frame gen)
+  FrameGeneration/       # AAAFrameGeneration target (FSR3 + DLSS-G + XeSS-FG frame gen)
   Upscaling/             # Upscaling target (FSR3 + DLSS spatial upscaling)
 include/                 # Shared headers (PCH, ENB SDK, Detours)
 extern/
   CommonLibF4/           # DearModdingFO4 (address-independent, all runtimes)
   FidelityFX-SDK/        # AMD FSR3 SDK
   Streamline/            # NVIDIA Streamline SDK v2.10.3 (DLSS, DLSS-G, Reflex)
+  XeSS/                  # Intel XeSS SDK (XeSS-FG, XeLL)
 package/
-  F4SE/Plugins/          # Runtime files (HLSL shaders, INI configs, Streamline DLLs)
+  F4SE/Plugins/          # Runtime files (HLSL shaders, INI configs)
+  MCM/                   # Mod Configuration Menu definitions
 cmake/
   Common.cmake           # Shared build config (configure_xse_plugin function)
 scripts/
   .env.example           # Template for local path config
+  fetch-sdks.sh          # Download third-party SDK runtime DLLs
   deploy.sh              # Build + deploy to MO2 test mod
   test.sh                # Automated game test pipeline
   compare-fg.sh          # A/B/C comparison: No FG vs FSR3 vs DLSS-G

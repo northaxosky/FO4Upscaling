@@ -39,7 +39,6 @@ bool XeSSFG::LoadLibraries()
 	LOAD_FN(fgModule, xefgSwapChainTagFrameConstants);
 	LOAD_FN(fgModule, xefgSwapChainSetPresentId);
 	LOAD_FN(fgModule, xefgSwapChainDestroy);
-	LOAD_FN(fgModule, xefgSwapChainGetLastPresentStatus);
 
 	if (!pfn_xellD3D12CreateContext || !pfn_xefgSwapChainD3D12CreateContext) {
 		REX::WARN("[XeSS-FG] Failed to resolve required function pointers");
@@ -249,22 +248,6 @@ void XeSSFG::SetEnabled(uint32_t a_enabled)
 {
 	if (xefgCtx && pfn_xefgSwapChainSetEnabled)
 		pfn_xefgSwapChainSetEnabled(xefgCtx, a_enabled);
-}
-
-void XeSSFG::LogPresentStatus()
-{
-	if (!xefgCtx || !pfn_xefgSwapChainGetLastPresentStatus) return;
-
-	xefg_swapchain_present_status_t status{};
-	auto result = pfn_xefgSwapChainGetLastPresentStatus(xefgCtx, &status);
-	if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-		static int logCount = 0;
-		if (logCount < 10 || logCount % 300 == 0) {
-			REX::INFO("[XeSS-FG] Present status: framesPresented={}, fgResult={}, fgEnabled={}",
-				status.framesPresented, (int)status.frameGenResult, status.isFrameGenEnabled);
-		}
-		logCount++;
-	}
 }
 
 void XeSSFG::Shutdown()

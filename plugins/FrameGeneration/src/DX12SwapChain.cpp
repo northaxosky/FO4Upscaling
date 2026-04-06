@@ -395,10 +395,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
 
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
-	if (isXeSSFrame) {
-		XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
-		XeSSFG::GetSingleton()->LogPresentStatus();
-	}
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
 	// Wait for previous frame to have finished
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();

@@ -35,7 +35,6 @@ public:
 		bool a_reset);
 	void SetEnabled(uint32_t a_enabled);
 
-	void LogPresentStatus();
 	void Shutdown();
 
 	bool initialized = false;
@@ -65,5 +64,4 @@ private:
 	decltype(&xefgSwapChainTagFrameConstants) pfn_xefgSwapChainTagFrameConstants = nullptr;
 	decltype(&xefgSwapChainSetPresentId) pfn_xefgSwapChainSetPresentId = nullptr;
 	decltype(&xefgSwapChainDestroy) pfn_xefgSwapChainDestroy = nullptr;
-	decltype(&xefgSwapChainGetLastPresentStatus) pfn_xefgSwapChainGetLastPresentStatus = nullptr;
 };

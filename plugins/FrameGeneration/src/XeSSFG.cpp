@@ -39,6 +39,7 @@ bool XeSSFG::LoadLibraries()
 	LOAD_FN(fgModule, xefgSwapChainTagFrameConstants);
 	LOAD_FN(fgModule, xefgSwapChainSetPresentId);
 	LOAD_FN(fgModule, xefgSwapChainDestroy);
+	LOAD_FN(fgModule, xefgSwapChainGetLastPresentStatus);
 
 	if (!pfn_xellD3D12CreateContext || !pfn_xefgSwapChainD3D12CreateContext) {
 		REX::WARN("[XeSS-FG] Failed to resolve required function pointers");
@@ -158,10 +159,12 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 
 void XeSSFG::BeginFrame(uint32_t a_frameId)
 {
-	if (!xellCtx || !pfn_xellSleep) return;
+	if (!xellCtx) return;
 
-	pfn_xellSleep(xellCtx, a_frameId);
-	pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
+	// Skip xellSleep — cross-vendor mode caps at 60fps on NVIDIA.
+	// DXGI frame latency waitable handles pacing instead.
+	if (pfn_xellAddMarkerData)
+		pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
 }
 
 void XeSSFG::SetMarker(xell_latency_marker_type_t a_marker, uint32_t a_frameId)
@@ -174,30 +177,31 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 	ID3D12GraphicsCommandList* a_cmdList,
 	ID3D12Resource* a_depth,
 	ID3D12Resource* a_motionVectors,
-	float2 a_screenSize, float2 a_jitter, float2 a_mvScale,
+	ID3D12Resource* a_hudlessColor,
+	float2 a_screenSize, float2 a_jitter,
 	float a_frameTimeDelta,
 	const float* a_viewMatrix, const float* a_projMatrix,
 	bool a_reset)
 {
-	if (!xefgCtx) return;
+	if (!xefgCtx || !pfn_xefgSwapChainD3D12TagFrameResource) return;
 
-	// Tag depth
-	if (a_depth && pfn_xefgSwapChainD3D12TagFrameResource) {
-		xefg_swapchain_d3d12_resource_data_t depthData{};
-		depthData.type = XEFG_SWAPCHAIN_RES_DEPTH;
-		depthData.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
-		depthData.resourceBase = { 0, 0 };
-		depthData.resourceSize = { (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
-		depthData.pResource = a_depth;
-		depthData.incomingState = D3D12_RESOURCE_STATE_COMMON;
-		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
+	// Tag HUDLess color (required for good interpolation quality)
+	if (a_hudlessColor) {
+		xefg_swapchain_d3d12_resource_data_t colorData{};
+		colorData.type = XEFG_SWAPCHAIN_RES_HUDLESS_COLOR;
+		colorData.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
+		colorData.resourceBase = { 0, 0 };
+		colorData.resourceSize = { (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
+		colorData.pResource = a_hudlessColor;
+		colorData.incomingState = D3D12_RESOURCE_STATE_COMMON;
+		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, nullptr, a_frameId, &colorData);
 	}
 
-	// Tag motion vectors
-	if (a_motionVectors && pfn_xefgSwapChainD3D12TagFrameResource) {
+	// Tag motion vectors (valid only now — need copy via command list)
+	if (a_motionVectors) {
 		xefg_swapchain_d3d12_resource_data_t mvData{};
 		mvData.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
-		mvData.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT;
+		mvData.validity = XEFG_SWAPCHAIN_RV_ONLY_NOW;
 		mvData.resourceBase = { 0, 0 };
 		mvData.resourceSize = { (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
 		mvData.pResource = a_motionVectors;
@@ -205,7 +209,19 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &mvData);
 	}
 
-	// Tag frame constants
+	// Tag depth (valid only now — need copy via command list)
+	if (a_depth) {
+		xefg_swapchain_d3d12_resource_data_t depthData{};
+		depthData.type = XEFG_SWAPCHAIN_RES_DEPTH;
+		depthData.validity = XEFG_SWAPCHAIN_RV_ONLY_NOW;
+		depthData.resourceBase = { 0, 0 };
+		depthData.resourceSize = { (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
+		depthData.pResource = a_depth;
+		depthData.incomingState = D3D12_RESOURCE_STATE_COMMON;
+		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
+	}
+
+	// Tag frame constants — MV scale 1.0 per sample (MVs are in pixel space, normalized)
 	if (pfn_xefgSwapChainTagFrameConstants) {
 		xefg_swapchain_frame_constant_data_t constants{};
 
@@ -216,8 +232,8 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 
 		constants.jitterOffsetX = a_jitter.x;
 		constants.jitterOffsetY = a_jitter.y;
-		constants.motionVectorScaleX = a_mvScale.x;
-		constants.motionVectorScaleY = a_mvScale.y;
+		constants.motionVectorScaleX = 1.0f;
+		constants.motionVectorScaleY = 1.0f;
 		constants.resetHistory = a_reset ? 1u : 0u;
 		constants.frameRenderTime = a_frameTimeDelta;
 
@@ -233,6 +249,22 @@ void XeSSFG::SetEnabled(uint32_t a_enabled)
 {
 	if (xefgCtx && pfn_xefgSwapChainSetEnabled)
 		pfn_xefgSwapChainSetEnabled(xefgCtx, a_enabled);
+}
+
+void XeSSFG::LogPresentStatus()
+{
+	if (!xefgCtx || !pfn_xefgSwapChainGetLastPresentStatus) return;
+
+	xefg_swapchain_present_status_t status{};
+	auto result = pfn_xefgSwapChainGetLastPresentStatus(xefgCtx, &status);
+	if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+		static int logCount = 0;
+		if (logCount < 10 || logCount % 300 == 0) {
+			REX::INFO("[XeSS-FG] Present status: framesPresented={}, fgResult={}, fgEnabled={}",
+				status.framesPresented, (int)status.frameGenResult, status.isFrameGenEnabled);
+		}
+		logCount++;
+	}
 }
 
 void XeSSFG::Shutdown()

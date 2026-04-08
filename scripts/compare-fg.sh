@@ -18,7 +18,7 @@ fi
 : "${MO2_PROFILE:?ERROR: MO2_PROFILE not set in .env}"
 : "${F4SE_LOG_DIR:?ERROR: F4SE_LOG_DIR not set in .env}"
 
-INI_FILE="$MOD_DIR/F4SE/Plugins/FrameGeneration.ini"
+INI_FILE="$MOD_DIR/MCM/Settings/FrameGeneration.ini"
 RESULTS_DIR="$PROJECT_ROOT/test-results/compare_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
 

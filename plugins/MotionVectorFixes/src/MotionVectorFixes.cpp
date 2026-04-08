@@ -75,7 +75,7 @@ static void ResetPreviousWorldDownwards(RE::NiAVObject* a_node)
 	if (!a_node)
 		return;
 
-	if (auto* node = fallout_cast<RE::NiNode*>(a_node))
+	if (auto* node = a_node->IsNode())
 		for (auto& child : node->children)
 			ResetPreviousWorldDownwards(child.get());
 
@@ -88,7 +88,7 @@ static void CacheWorldTransforms(RE::NiAVObject* a_node, std::unordered_map<RE::
 	if (!a_node)
 		return;
 
-	if (auto* node = fallout_cast<RE::NiNode*>(a_node))
+	if (auto* node = a_node->IsNode())
 		for (auto& child : node->children)
 			CacheWorldTransforms(child.get(), a_cache);
 
@@ -101,7 +101,7 @@ static void RestorePreviousWorld(RE::NiAVObject* a_node, std::unordered_map<RE::
 	if (!a_node)
 		return;
 
-	if (auto* node = fallout_cast<RE::NiNode*>(a_node))
+	if (auto* node = a_node->IsNode())
 		for (auto& child : node->children)
 			RestorePreviousWorld(child.get(), a_cache);
 

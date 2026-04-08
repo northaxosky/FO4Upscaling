@@ -27,3 +27,4 @@ find_package(magic_enum CONFIG REQUIRED)
 # Plugin targets
 add_subdirectory(plugins/FrameGeneration)
 add_subdirectory(plugins/Upscaling)
+add_subdirectory(plugins/MotionVectorFixes)

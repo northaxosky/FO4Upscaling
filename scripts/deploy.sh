@@ -21,6 +21,7 @@ PACKAGE_DIR="$PROJECT_ROOT/package"
 
 FG_BUILD="$BUILD_DIR/plugins/FrameGeneration/Release"
 US_BUILD="$BUILD_DIR/plugins/Upscaling/Release"
+MV_BUILD="$BUILD_DIR/plugins/MotionVectorFixes/Release"
 
 check_game_running() {
     if tasklist.exe 2>/dev/null | grep -qi "Fallout4"; then
@@ -68,6 +69,10 @@ deploy() {
     cp "$US_BUILD/Upscaling.dll" "$DEST/"
     [ -f "$US_BUILD/Upscaling.pdb" ] && cp "$US_BUILD/Upscaling.pdb" "$DEST/"
     echo "  Upscaling.dll deployed"
+
+    cp "$MV_BUILD/MotionVectorFixes.dll" "$DEST/"
+    [ -f "$MV_BUILD/MotionVectorFixes.pdb" ] && cp "$MV_BUILD/MotionVectorFixes.pdb" "$DEST/"
+    echo "  MotionVectorFixes.dll deployed"
 
     # HLSL shaders (package)
     cp "$PACKAGE_DIR/F4SE/Plugins/Upscaling/"*.hlsl "$DEST/Upscaling/"

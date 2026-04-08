@@ -50,6 +50,7 @@ jobs:
           # Built DLLs
           cp build/plugins/FrameGeneration/Release/AAAFrameGeneration.dll staging/F4SE/Plugins/
           cp build/plugins/Upscaling/Release/Upscaling.dll staging/F4SE/Plugins/
+          cp build/plugins/MotionVectorFixes/Release/MotionVectorFixes.dll staging/F4SE/Plugins/
           # Package assets (shaders, DLLs, configs)
           cp -r package/F4SE/Plugins/* staging/F4SE/Plugins/
           # FrameGeneration needs its own Streamline copy

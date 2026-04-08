@@ -10,6 +10,7 @@ Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearM
 |--------|-----|-------------|
 | **AAAFrameGeneration** | `AAAFrameGeneration.dll` | Frame generation with FSR3 (AMD), DLSS-G (NVIDIA RTX 40+), and XeSS-FG (Intel/cross-vendor) via D3D11/D3D12 interop |
 | **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline |
+| **MotionVectorFixes** | `MotionVectorFixes.dll` | Standalone fixes for broken motion vectors (weapon ghosting, menu ghosting, animated objects) |
 
 ## Frame Generation
 
@@ -48,6 +49,7 @@ cmake --build build --config Release
 Output:
 - `build/plugins/FrameGeneration/Release/AAAFrameGeneration.dll`
 - `build/plugins/Upscaling/Release/Upscaling.dll`
+- `build/plugins/MotionVectorFixes/Release/MotionVectorFixes.dll`
 
 ## SDK Runtime DLLs
 
@@ -91,6 +93,7 @@ Results are saved to `test-results/<timestamp>/` with logs, screenshots, and a p
 plugins/
   FrameGeneration/       # AAAFrameGeneration target (FSR3 + DLSS-G + XeSS-FG frame gen)
   Upscaling/             # Upscaling target (FSR3 + DLSS spatial upscaling)
+  MotionVectorFixes/     # Standalone motion vector bug fixes
 include/                 # Shared headers (PCH, ENB SDK, Detours)
 extern/
   CommonLibF4/           # DearModdingFO4 (address-independent, all runtimes)
@@ -107,8 +110,20 @@ scripts/
   fetch-sdks.sh          # Download third-party SDK runtime DLLs
   deploy.sh              # Build + deploy to MO2 test mod
   test.sh                # Automated game test pipeline
-  compare-fg.sh          # A/B/C comparison: No FG vs FSR3 vs DLSS-G
+  compare-fg.sh          # A/B/C comparison: No FG vs FSR3 vs DLSS-G vs XeSS-FG
 ```
+
+## Releases
+
+Each release produces 3 separate distributable zips, one per plugin:
+
+| Package | Contents |
+|---------|----------|
+| `MotionVectorFixes-vX.X.X.zip` | DLL + PDB |
+| `Upscaling-vX.X.X.zip` | DLL + PDB + shaders + Streamline DLLs + MCM config + mesh overrides |
+| `FrameGeneration-vX.X.X.zip` | DLL + PDB + shaders + Streamline + FidelityFX + XeSS DLLs + MCM config |
+
+Each zip has the correct folder structure for MO2 — extract into your mod folder.
 
 ## License
 

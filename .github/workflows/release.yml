@@ -57,26 +57,78 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: cmake --build build --config Release
 
-      - name: Package mod
+      - name: Fetch SDK runtime DLLs
+        if: steps.check_tag.outputs.exists == 'false'
+        shell: bash
+        run: bash scripts/fetch-sdks.sh
+
+      - name: Package plugins
         if: steps.check_tag.outputs.exists == 'false'
         shell: bash
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          mkdir -p staging/F4SE/Plugins
-          # Built DLLs
-          cp build/plugins/FrameGeneration/Release/AAAFrameGeneration.dll staging/F4SE/Plugins/
-          cp build/plugins/Upscaling/Release/Upscaling.dll staging/F4SE/Plugins/
-          # Package assets
-          cp -r package/F4SE/Plugins/* staging/F4SE/Plugins/
-          mkdir -p staging/F4SE/Plugins/FrameGeneration/Streamline
-          for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do
-            [ -f "package/F4SE/Plugins/Streamline/$dll" ] && cp "package/F4SE/Plugins/Streamline/$dll" staging/F4SE/Plugins/FrameGeneration/Streamline/
+          PKG="package"
+          BLD="build/plugins"
+
+          # --- MotionVectorFixes ---
+          MV="staging-mv"
+          mkdir -p "$MV/F4SE/Plugins"
+          cp "$BLD/MotionVectorFixes/Release/MotionVectorFixes.dll" "$MV/F4SE/Plugins/"
+          [ -f "$BLD/MotionVectorFixes/Release/MotionVectorFixes.pdb" ] && \
+            cp "$BLD/MotionVectorFixes/Release/MotionVectorFixes.pdb" "$MV/F4SE/Plugins/"
+          cd "$MV" && 7z a -tzip "../MotionVectorFixes-v${VERSION}.zip" . && cd ..
+
+          # --- Upscaling ---
+          US="staging-us"
+          mkdir -p "$US/F4SE/Plugins/Upscaling"
+          mkdir -p "$US/F4SE/Plugins/Streamline"
+          mkdir -p "$US/MCM/Config/Upscaling"
+          # DLL + PDB
+          cp "$BLD/Upscaling/Release/Upscaling.dll" "$US/F4SE/Plugins/"
+          [ -f "$BLD/Upscaling/Release/Upscaling.pdb" ] && \
+            cp "$BLD/Upscaling/Release/Upscaling.pdb" "$US/F4SE/Plugins/"
+          # Shaders
+          cp "$PKG/F4SE/Plugins/Upscaling/"*.hlsl "$US/F4SE/Plugins/Upscaling/"
+          # Streamline DLLs (shared — DLSS spatial upscaling)
+          cp "$PKG/F4SE/Plugins/Streamline/"*.dll "$US/F4SE/Plugins/Streamline/"
+          # MCM config
+          cp "$PKG/MCM/Config/Upscaling/"* "$US/MCM/Config/Upscaling/"
+          # Mesh overrides
+          if [ -d "$PKG/Meshes" ]; then
+            cp -r "$PKG/Meshes" "$US/"
+          fi
+          cd "$US" && 7z a -tzip "../Upscaling-v${VERSION}.zip" . && cd ..
+
+          # --- FrameGeneration ---
+          FG="staging-fg"
+          mkdir -p "$FG/F4SE/Plugins/FrameGeneration/FidelityFX"
+          mkdir -p "$FG/F4SE/Plugins/FrameGeneration/XeSS"
+          mkdir -p "$FG/F4SE/Plugins/FrameGeneration/Streamline"
+          mkdir -p "$FG/F4SE/Plugins/Streamline"
+          mkdir -p "$FG/MCM/Config/FrameGeneration"
+          # DLL + PDB
+          cp "$BLD/FrameGeneration/Release/AAAFrameGeneration.dll" "$FG/F4SE/Plugins/"
+          [ -f "$BLD/FrameGeneration/Release/AAAFrameGeneration.pdb" ] && \
+            cp "$BLD/FrameGeneration/Release/AAAFrameGeneration.pdb" "$FG/F4SE/Plugins/"
+          # Shaders
+          cp "$PKG/F4SE/Plugins/FrameGeneration/"*.hlsl "$FG/F4SE/Plugins/FrameGeneration/"
+          # FidelityFX (FSR3 frame gen)
+          cp "$PKG/F4SE/Plugins/FrameGeneration/FidelityFX/amd_fidelityfx_dx12.dll" "$FG/F4SE/Plugins/FrameGeneration/FidelityFX/"
+          # XeSS-FG (Intel frame gen)
+          for dll in libxess_fg.dll libxell.dll; do
+            [ -f "$PKG/F4SE/Plugins/FrameGeneration/XeSS/$dll" ] && \
+              cp "$PKG/F4SE/Plugins/FrameGeneration/XeSS/$dll" "$FG/F4SE/Plugins/FrameGeneration/XeSS/"
           done
-          cp -r package/MCM staging/
-          [ -d package/Meshes ] && cp -r package/Meshes staging/
-          [ -d package/Textures ] && cp -r package/Textures staging/
-          # Create zip
-          cd staging && 7z a -tzip "../FO4Upscaling-v${VERSION}.zip" . && cd ..
+          # Streamline — shared path (interposer loaded by both plugins)
+          cp "$PKG/F4SE/Plugins/Streamline/"*.dll "$FG/F4SE/Plugins/Streamline/"
+          # Streamline — FG-specific path (DLSS-G, Reflex, PCL)
+          for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do
+            [ -f "$PKG/F4SE/Plugins/Streamline/$dll" ] && \
+              cp "$PKG/F4SE/Plugins/Streamline/$dll" "$FG/F4SE/Plugins/FrameGeneration/Streamline/"
+          done
+          # MCM config
+          cp "$PKG/MCM/Config/FrameGeneration/"* "$FG/MCM/Config/FrameGeneration/"
+          cd "$FG" && 7z a -tzip "../FrameGeneration-v${VERSION}.zip" . && cd ..
 
       - name: Create release
         if: steps.check_tag.outputs.exists == 'false'
@@ -84,5 +136,8 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          files: FO4Upscaling-v${{ steps.version.outputs.version }}.zip
+          files: |
+            MotionVectorFixes-v${{ steps.version.outputs.version }}.zip
+            Upscaling-v${{ steps.version.outputs.version }}.zip
+            FrameGeneration-v${{ steps.version.outputs.version }}.zip
           generate_release_notes: true

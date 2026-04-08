@@ -113,6 +113,8 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	auto upscaling = Upscaling::GetSingleton();
 	uint32_t requestedFrames = std::clamp((uint32_t)upscaling->settings.frameGenFrames, 1u, maxFrames);
 
+	configuredFrameCount = requestedFrames;
+
 	sl::DLSSGOptions options{};
 	options.mode = sl::DLSSGMode::eOn;
 	options.numFramesToGenerate = requestedFrames;
@@ -142,6 +144,16 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	}
 
 	return true;
+}
+
+void StreamlineFG::SetEnabled(bool a_enabled)
+{
+	if (!slDLSSGSetOptions || !featureDLSSG) return;
+
+	sl::DLSSGOptions options{};
+	options.mode = a_enabled ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
+	options.numFramesToGenerate = configuredFrameCount;
+	slDLSSGSetOptions(viewport, options);
 }
 
 static sl::float4x4 toSLMatrix(const __m128* mat)

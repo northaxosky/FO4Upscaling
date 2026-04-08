@@ -29,6 +29,7 @@ public:
 	bool InitStreamline();
 	void SetD3DDevice(ID3D12Device* a_device);
 	bool CheckAndEnableDLSSG();
+	void SetEnabled(bool a_enabled);
 
 	void AcquireFrameToken();
 	void SetPCLMarker(sl::PCLMarker marker);
@@ -59,6 +60,7 @@ public:
 
 	bool slInitialized = false;
 	bool featureDLSSG = false;
+	uint32_t configuredFrameCount = 1;
 	ID3D12Device* d3d12Device = nullptr;
 	HMODULE interposer = nullptr;
 	sl::ViewportHandle viewport{ 0 };

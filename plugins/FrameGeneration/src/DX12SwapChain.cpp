@@ -249,6 +249,13 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
+		// Toggle DLSS-G on/off only on state changes (matches XeSS pattern)
+		static bool dlssgWasEnabled = false;
+		if (useFrameGenerationThisFrame != dlssgWasEnabled) {
+			dlssg->SetEnabled(useFrameGenerationThisFrame);
+			dlssgWasEnabled = useFrameGenerationThisFrame;
+		}
+
 		// Per-frame sequence matching NVIDIA sample ordering:
 		// 1. Frame token → 2. Sleep → 3. Sim markers → 4. Constants+tags → 5. Render markers → 6. Present markers
 		dlssg->AcquireFrameToken();

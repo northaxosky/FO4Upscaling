@@ -39,7 +39,7 @@ run_config() {
     cat > "$INI_FILE" <<INIEOF
 [Settings]
 bFrameGenerationMode=$FG_MODE
-bFrameLimitMode=false
+bFrameLimitMode=0
 iFrameGenType=$FG_TYPE
 INIEOF
 
@@ -103,15 +103,15 @@ echo "=== Building ==="
 "$SCRIPT_DIR/deploy.sh" build
 
 # Run all 3 configs
-run_config "1_no_fg"    "false" "0"
-run_config "2_fsr3_fg"  "true"  "0"
-run_config "3_dlssg_fg" "true"  "1"
+run_config "1_no_fg"    "0" "0"
+run_config "2_fsr3_fg"  "1" "0"
+run_config "3_dlssg_fg" "1" "1"
 
 # Restore default INI
 cat > "$INI_FILE" <<INIEOF
 [Settings]
-bFrameGenerationMode=true
-bFrameLimitMode=false
+bFrameGenerationMode=1
+bFrameLimitMode=1
 iFrameGenType=1
 INIEOF
 

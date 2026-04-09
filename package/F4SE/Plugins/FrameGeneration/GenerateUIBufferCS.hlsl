@@ -5,9 +5,11 @@
 // DLSS-G compositing formula:
 //   Final_Color.RGB = UI.RGB + (1 - UI.Alpha) * Hudless.RGB
 //
-// We observe Final and Hudless, and need to produce UI with premultiplied alpha.
-// For opaque UI (like Fallout 4's crosshair/compass): alpha ≈ 1 where UI exists.
-// For the general case, we estimate alpha from the maximum channel difference.
+// Two UI rendering modes must be handled:
+//   1. Additive/bright UI (crosshair, text): Backbuffer > HUDLess
+//      Alpha estimated from max color channel difference.
+//   2. Darkening UI (menu backgrounds, overlays): Backbuffer < HUDLess
+//      Alpha estimated from scene attenuation ratio.
 
 Texture2D<float4> HUDLessColor : register(t0);   // Clean scene without UI
 Texture2D<float4> BackbufferColor : register(t1); // Final frame with UI composited
@@ -30,19 +32,22 @@ void main(uint3 DTid : SV_DispatchThreadID)
 		return;
 	}
 
-	// For opaque additive UI (Fallout 4 HUD):
-	//   Final = UI_color + Hudless  (additive blend, alpha=1)
-	//   UI_premultiplied = Final - Hudless = diff (signed)
-	// For alpha-blended UI:
-	//   Final = UI*alpha + Hudless*(1-alpha)
-	//   alpha ≈ maxDiff (when UI and scene colors differ significantly)
-	//
-	// We treat alpha as 1.0 for any pixel that differs, since Fallout 4 HUD
-	// elements are opaque overlays. The premultiplied RGB is just the difference.
-	float alpha = saturate(maxDiff);
+	// Brightening UI (crosshair, text, icons): color was added to the scene
+	float brighteningAlpha = saturate(maxDiff);
+
+	// Darkening UI (menu backgrounds, overlays): scene was attenuated
+	// Ratio of how much scene color remains: low ratio = high opacity overlay
+	float3 safeHudless = max(hudless, 0.004);
+	float3 ratio = finalColor / safeHudless;
+	float minRatio = min(ratio.r, min(ratio.g, ratio.b));
+	float darkeningAlpha = saturate(1.0 - minRatio);
+
+	// Use whichever mode produced higher alpha
+	float alpha = max(brighteningAlpha, darkeningAlpha);
 
 	// Premultiplied RGB: the UI contribution
-	// For additive blend: UI_premul = Final - Hudless * (1 - alpha)
+	// From: Final = UI_premul + (1 - alpha) * Hudless
+	// So:   UI_premul = Final - Hudless * (1 - alpha)
 	float3 uiPremul = finalColor - hudless * (1.0 - alpha);
 	uiPremul = max(uiPremul, float3(0.0, 0.0, 0.0));
 	uiPremul = min(uiPremul, float3(1.0, 1.0, 1.0));

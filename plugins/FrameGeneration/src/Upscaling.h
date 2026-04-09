@@ -48,11 +48,7 @@ public:
 
 	bool setupBuffers = false;
 
-	// OMSetRenderTargets hook for HUDLess capture
 	bool imagespaceComplete = false;
-	bool hudlessCapturedThisFrame = false;
-
-	void HookOMSetRenderTargets(ID3D11DeviceContext* a_context);
 
 	void LoadSettings();
 	void ReloadSettingsIfNeeded();

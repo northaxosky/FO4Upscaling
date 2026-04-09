@@ -118,8 +118,6 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	sl::DLSSGOptions options{};
 	options.mode = sl::DLSSGMode::eOn;
 	options.numFramesToGenerate = requestedFrames;
-	options.hudLessBufferFormat = 28;  // DXGI_FORMAT_R8G8B8A8_UNORM
-	options.uiBufferFormat = 28;       // DXGI_FORMAT_R8G8B8A8_UNORM
 
 	auto result = slDLSSGSetOptions(viewport, options);
 	if (result != sl::Result::eOk) {

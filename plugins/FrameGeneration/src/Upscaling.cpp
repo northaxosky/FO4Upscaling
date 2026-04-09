@@ -654,58 +654,6 @@ void Upscaling::Reset()
 	context->ClearRenderTargetView(UIColorAlphaShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
 }
 
-// OMSetRenderTargets hook — captures pre-UI framebuffer for DLSS-G HUDLess
-using OMSetRenderTargetsFn = void(__stdcall*)(ID3D11DeviceContext*, UINT,
-	ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
-static OMSetRenderTargetsFn originalOMSetRenderTargets = nullptr;
-
-void __stdcall hk_OMSetRenderTargets(ID3D11DeviceContext* This, UINT NumViews,
-	ID3D11RenderTargetView* const* ppRenderTargetViews,
-	ID3D11DepthStencilView* pDepthStencilView)
-{
-	auto upscaling = Upscaling::GetSingleton();
-
-	// Gate: only capture after imagespace completes, before first UI draw
-	if (upscaling->d3d12Interop && upscaling->setupBuffers &&
-		upscaling->imagespaceComplete && !upscaling->hudlessCapturedThisFrame &&
-		NumViews >= 1 && ppRenderTargetViews && ppRenderTargetViews[0] &&
-		pDepthStencilView == nullptr)
-	{
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		auto& frameBuffer = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
-		auto frameBufferRTV = reinterpret_cast<ID3D11RenderTargetView*>(frameBuffer.rtView);
-
-		if (ppRenderTargetViews[0] == frameBufferRTV) {
-			auto dx12SwapChain = DX12SwapChain::GetSingleton();
-
-			ID3D11Resource* framebufferResource;
-			frameBufferRTV->GetResource(&framebufferResource);
-
-			This->CopyResource(
-				upscaling->HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(),
-				framebufferResource);
-
-			framebufferResource->Release();
-			upscaling->hudlessCapturedThisFrame = true;
-
-			static bool loggedOnce = false;
-			if (!loggedOnce) {
-				REX::INFO("[FG] HUDLess captured via OMSetRenderTargets hook");
-				loggedOnce = true;
-			}
-		}
-	}
-
-	originalOMSetRenderTargets(This, NumViews, ppRenderTargetViews, pDepthStencilView);
-}
-
-void Upscaling::HookOMSetRenderTargets(ID3D11DeviceContext* a_context)
-{
-	*(uintptr_t*)&originalOMSetRenderTargets = Detours::X64::DetourClassVTable(
-		*(uintptr_t*)a_context, &hk_OMSetRenderTargets, 33);
-	REX::INFO("[FG] Hooked OMSetRenderTargets (vtable index 33)");
-}
-
 struct WindowSizeChanged
 {
 	static void thunk(RE::BSGraphics::Renderer*, unsigned int)
@@ -727,8 +675,6 @@ struct SetUseDynamicResolutionViewportAsDefaultViewport
 			upscaling->imagespaceComplete = true;
 			upscaling->PostDisplay();
 		} else {
-			// New frame starting — reset per-frame flags
-			upscaling->hudlessCapturedThisFrame = false;
 			upscaling->imagespaceComplete = false;
 		}
 	}

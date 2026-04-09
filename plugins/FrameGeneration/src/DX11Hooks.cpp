@@ -87,7 +87,6 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	ID3D11DeviceContext* context;
 	a_device->GetImmediateContext(&context);
 	proxy->SetD3D11DeviceContext(context);
-	Upscaling::GetSingleton()->HookOMSetRenderTargets(context);
 
 	// For DLSS-G: init Streamline BEFORE D3D12 device
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
@@ -235,7 +234,6 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				ID3D11DeviceContext* context;
 				(*ppDevice)->GetImmediateContext(&context);
 				proxy->SetD3D11DeviceContext(context);
-				Upscaling::GetSingleton()->HookOMSetRenderTargets(context);
 
 				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {

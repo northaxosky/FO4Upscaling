@@ -11,11 +11,63 @@
 
 #include "ENB/ENBSeriesAPI.h"
 #include "XeSSFG.h"
+#include "UICompositor.h"
 
 bool enbLoaded = false;
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;
 decltype(&IDXGIFactory::CreateSwapChain) ptrCreateSwapChain;
+
+// Real swap chain hooks for DLSS-G UI compositing
+using PFN_CreateSwapChainForHwnd = HRESULT(WINAPI*)(IDXGIFactory2*, IUnknown*, HWND,
+	const DXGI_SWAP_CHAIN_DESC1*, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
+static PFN_CreateSwapChainForHwnd ptrCreateSwapChainForHwnd = nullptr;
+
+using PFN_RealPresent = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
+static PFN_RealPresent ptrRealPresent = nullptr;
+
+static HRESULT WINAPI hk_RealPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags)
+{
+	UICompositor::GetSingleton()->CompositeUI(This);
+	return ptrRealPresent(This, SyncInterval, Flags);
+}
+
+static HRESULT WINAPI hk_CreateSwapChainForHwnd(IDXGIFactory2* This, IUnknown* pDevice, HWND hWnd,
+	const DXGI_SWAP_CHAIN_DESC1* pDesc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
+	IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain)
+{
+	REX::INFO("[DLSSG-UI] CreateSwapChainForHwnd hook fired (factory={:#x})", (uintptr_t)This);
+
+	HRESULT hr = ptrCreateSwapChainForHwnd(This, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput, ppSwapChain);
+	if (FAILED(hr) || !ppSwapChain || !*ppSwapChain)
+		return hr;
+
+	REX::INFO("[DLSSG-UI] Real swap chain created: {:#x}, format={}, {}x{}",
+		(uintptr_t)*ppSwapChain, pDesc ? (int)pDesc->Format : -1,
+		pDesc ? pDesc->Width : 0, pDesc ? pDesc->Height : 0);
+
+	// Hook Present (vtable index 8) on the real swap chain
+	IDXGISwapChain1* realSC = *ppSwapChain;
+	*(uintptr_t*)&ptrRealPresent = Detours::X64::DetourClassVTable(
+		*(uintptr_t*)realSC, &hk_RealPresent, 8);
+
+	// Store in compositor
+	IDXGISwapChain4* realSC4 = nullptr;
+	realSC->QueryInterface(IID_PPV_ARGS(&realSC4));
+
+	ID3D12CommandQueue* cmdQueue = nullptr;
+	pDevice->QueryInterface(IID_PPV_ARGS(&cmdQueue));
+
+	if (realSC4 && cmdQueue) {
+		UICompositor::GetSingleton()->SetRealSwapChain(realSC4, cmdQueue);
+		REX::INFO("[DLSSG-UI] Real swap chain Present hooked (vtable index 8)");
+	} else {
+		REX::WARN("[DLSSG-UI] Failed to QI swap chain ({:#x}) or command queue ({:#x})",
+			(uintptr_t)realSC4, (uintptr_t)cmdQueue);
+	}
+
+	return hr;
+}
 
 HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain)
 {
@@ -35,6 +87,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	ID3D11DeviceContext* context;
 	a_device->GetImmediateContext(&context);
 	proxy->SetD3D11DeviceContext(context);
+	Upscaling::GetSingleton()->HookOMSetRenderTargets(context);
 
 	// For DLSS-G: init Streamline BEFORE D3D12 device
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
@@ -57,6 +110,13 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
+
+		// Hook CreateSwapChainForHwnd on original factory BEFORE Streamline wraps it (ENB path)
+		if (!ptrCreateSwapChainForHwnd) {
+			*(uintptr_t*)&ptrCreateSwapChainForHwnd = Detours::X64::DetourClassVTable(
+				*(uintptr_t*)factory, &hk_CreateSwapChainForHwnd, 15);
+			REX::INFO("[DLSSG-UI] Hooked IDXGIFactory2::CreateSwapChainForHwnd (vtable 15) on original factory (ENB path)");
+		}
 
 		ID3D12Device* rawDevice = proxy->d3d12Device.get();
 		dlssg->slUpgradeInterface((void**)&rawDevice);
@@ -175,6 +235,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				ID3D11DeviceContext* context;
 				(*ppDevice)->GetImmediateContext(&context);
 				proxy->SetD3D11DeviceContext(context);
+				Upscaling::GetSingleton()->HookOMSetRenderTargets(context);
 
 				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
@@ -197,6 +258,15 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
+
+					// Hook CreateSwapChainForHwnd on the ORIGINAL factory BEFORE Streamline wraps it
+					// Streamline's factory wrapper will call through to the original → our hook fires
+					// This lets us capture the real swap chain and hook its Present for UI compositing
+					if (!ptrCreateSwapChainForHwnd) {
+						*(uintptr_t*)&ptrCreateSwapChainForHwnd = Detours::X64::DetourClassVTable(
+							*(uintptr_t*)dxgiFactory, &hk_CreateSwapChainForHwnd, 15);
+						REX::INFO("[DLSSG-UI] Hooked IDXGIFactory2::CreateSwapChainForHwnd (vtable 15) on original factory");
+					}
 
 					ID3D12Device* rawDevice = proxy->d3d12Device.get();
 					dlssg->slUpgradeInterface((void**)&rawDevice);

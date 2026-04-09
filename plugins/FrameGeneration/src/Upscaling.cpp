@@ -217,6 +217,17 @@ void Upscaling::CreateFrameGenerationResources()
 		motionVectorBufferShared[index]->CreateRTV(rtvDesc);
 		motionVectorBufferShared[index]->CreateUAV(uavDesc);
 
+		// UIColorAndAlpha buffer — R8G8B8A8_UNORM for premultiplied alpha UI extraction
+		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		srvDesc.Format = texDesc.Format;
+		rtvDesc.Format = texDesc.Format;
+		uavDesc.Format = texDesc.Format;
+
+		UIColorAlphaShared[index] = new Texture2D(texDesc);
+		UIColorAlphaShared[index]->CreateSRV(srvDesc);
+		UIColorAlphaShared[index]->CreateRTV(rtvDesc);
+		UIColorAlphaShared[index]->CreateUAV(uavDesc);
+
 		auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
 		{
@@ -278,10 +289,33 @@ void Upscaling::CreateFrameGenerationResources()
 				CloseHandle(sharedHandle);
 			}
 		}
+
+		{
+			IDXGIResource1* dxgiResource = nullptr;
+			DX::ThrowIfFailed(UIColorAlphaShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+
+			if (dx12SwapChain->swapChain) {
+				HANDLE sharedHandle = nullptr;
+				DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
+					nullptr,
+					DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+					nullptr,
+					&sharedHandle));
+
+				DX::ThrowIfFailed(dx12SwapChain->d3d12Device->OpenSharedHandle(
+					sharedHandle,
+					IID_PPV_ARGS(&UIColorAlphaShared12[index])));
+
+				CloseHandle(sharedHandle);
+			}
+		}
 	}
 
 	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", "cs_5_0");
 	generateSharedBuffersCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", "cs_5_0");
+	generateUIBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateUIBufferCS.hlsl", "cs_5_0");
+
+	REX::INFO("[FG] Frame generation resources created (HUDLess + Depth + MVec + UIColorAlpha)");
 }
 
 void Upscaling::PreAlpha()
@@ -517,7 +551,7 @@ void Upscaling::PostDisplay()
 
 	if (!setupBuffers)
 		CreateFrameGenerationResources();
-	
+
 	auto rendererData = RE::BSGraphics::GetRendererData();
 
 	auto& swapChain = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
@@ -526,7 +560,78 @@ void Upscaling::PostDisplay()
 
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
-	reinterpret_cast<ID3D11DeviceContext*>(rendererData->context)->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+	context->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[FG] PostDisplay captured HUDLess (frameIdx={})", dx12SwapChain->frameIndex);
+		loggedOnce = true;
+	}
+}
+
+void Upscaling::GenerateUIBuffer()
+{
+	if (!d3d12Interop || !setupBuffers || !generateUIBufferCS)
+		return;
+
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+	// Get the backbuffer SRV (final frame with UI composited)
+	ID3D11ShaderResourceView* backbufferSRV = nullptr;
+	extern bool enbLoaded;
+	if (enbLoaded)
+		backbufferSRV = dx12SwapChain->swapChainBufferProxyENB->srv;
+	else
+		backbufferSRV = dx12SwapChain->swapChainBufferProxy->srv.get();
+
+	if (!backbufferSRV) {
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::WARN("[FG] GenerateUIBuffer: no backbuffer SRV available");
+			loggedOnce = true;
+		}
+		return;
+	}
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+	// Unbind render targets — the proxy backbuffer may still be bound as RTV from game rendering.
+	// D3D11 silently returns zeros when reading a resource that's simultaneously bound as RTV.
+	context->OMSetRenderTargets(0, nullptr, nullptr);
+
+	uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
+	uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);
+
+	// t0 = HUDLess (clean scene), t1 = Backbuffer (scene + UI)
+	ID3D11ShaderResourceView* srvs[2] = {
+		HUDLessBufferShared[dx12SwapChain->frameIndex]->srv.get(),
+		backbufferSRV
+	};
+	context->CSSetShaderResources(0, 2, srvs);
+
+	// u0 = UIColorAndAlpha output
+	ID3D11UnorderedAccessView* uavs[1] = {
+		UIColorAlphaShared[dx12SwapChain->frameIndex]->uav.get()
+	};
+	context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+
+	context->CSSetShader(generateUIBufferCS, nullptr, 0);
+	context->Dispatch(dispatchX, dispatchY, 1);
+
+	// Unbind
+	ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
+	context->CSSetShaderResources(0, 2, nullSRVs);
+	ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+	context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+	context->CSSetShader(nullptr, nullptr, 0);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[FG] GenerateUIBuffer: dispatch={}x{}", dispatchX, dispatchY);
+		loggedOnce = true;
+	}
 }
 
 void Upscaling::Reset()
@@ -546,6 +651,59 @@ void Upscaling::Reset()
 	context->ClearRenderTargetView(HUDLessBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
 	context->ClearRenderTargetView(depthBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
 	context->ClearRenderTargetView(motionVectorBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+	context->ClearRenderTargetView(UIColorAlphaShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+}
+
+// OMSetRenderTargets hook — captures pre-UI framebuffer for DLSS-G HUDLess
+using OMSetRenderTargetsFn = void(__stdcall*)(ID3D11DeviceContext*, UINT,
+	ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
+static OMSetRenderTargetsFn originalOMSetRenderTargets = nullptr;
+
+void __stdcall hk_OMSetRenderTargets(ID3D11DeviceContext* This, UINT NumViews,
+	ID3D11RenderTargetView* const* ppRenderTargetViews,
+	ID3D11DepthStencilView* pDepthStencilView)
+{
+	auto upscaling = Upscaling::GetSingleton();
+
+	// Gate: only capture after imagespace completes, before first UI draw
+	if (upscaling->d3d12Interop && upscaling->setupBuffers &&
+		upscaling->imagespaceComplete && !upscaling->hudlessCapturedThisFrame &&
+		NumViews >= 1 && ppRenderTargetViews && ppRenderTargetViews[0] &&
+		pDepthStencilView == nullptr)
+	{
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		auto& frameBuffer = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
+		auto frameBufferRTV = reinterpret_cast<ID3D11RenderTargetView*>(frameBuffer.rtView);
+
+		if (ppRenderTargetViews[0] == frameBufferRTV) {
+			auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+			ID3D11Resource* framebufferResource;
+			frameBufferRTV->GetResource(&framebufferResource);
+
+			This->CopyResource(
+				upscaling->HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(),
+				framebufferResource);
+
+			framebufferResource->Release();
+			upscaling->hudlessCapturedThisFrame = true;
+
+			static bool loggedOnce = false;
+			if (!loggedOnce) {
+				REX::INFO("[FG] HUDLess captured via OMSetRenderTargets hook");
+				loggedOnce = true;
+			}
+		}
+	}
+
+	originalOMSetRenderTargets(This, NumViews, ppRenderTargetViews, pDepthStencilView);
+}
+
+void Upscaling::HookOMSetRenderTargets(ID3D11DeviceContext* a_context)
+{
+	*(uintptr_t*)&originalOMSetRenderTargets = Detours::X64::DetourClassVTable(
+		*(uintptr_t*)a_context, &hk_OMSetRenderTargets, 33);
+	REX::INFO("[FG] Hooked OMSetRenderTargets (vtable index 33)");
 }
 
 struct WindowSizeChanged
@@ -560,9 +718,19 @@ struct SetUseDynamicResolutionViewportAsDefaultViewport
 {
 	static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
 	{
+		auto upscaling = Upscaling::GetSingleton();
+
 		func(This, a_true);
-		if (!a_true)
-			Upscaling::GetSingleton()->PostDisplay();
+
+		if (!a_true) {
+			// Imagespace just completed — capture HUDLess (pre-UI scene)
+			upscaling->imagespaceComplete = true;
+			upscaling->PostDisplay();
+		} else {
+			// New frame starting — reset per-frame flags
+			upscaling->hudlessCapturedThisFrame = false;
+			upscaling->imagespaceComplete = false;
+		}
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };

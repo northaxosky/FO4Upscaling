@@ -51,6 +51,7 @@ public:
 		ID3D12Resource* a_depth,
 		ID3D12Resource* a_motionVectors,
 		ID3D12Resource* a_hudlessColor,
+		ID3D12Resource* a_uiColorAlpha,
 		float2 a_screenSize,
 		float2 a_jitter,
 		float a_cameraNear, float a_cameraFar,

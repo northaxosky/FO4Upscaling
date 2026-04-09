@@ -5,6 +5,7 @@
 
 #include "FidelityFX.h"
 #include "Streamline.h"
+#include "UICompositor.h"
 #include "Upscaling.h"
 #include "XeSSFG.h"
 
@@ -164,10 +165,19 @@ void DX12SwapChain::CreateInterop()
 	texDesc11.MiscFlags = 0;
 
 	// Create interop textures
-	if (enbLoaded)
+	if (enbLoaded) {
 		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
-	else
+	} else {
 		swapChainBufferProxy = new Texture2D(texDesc11);
+
+		// Create SRV for the proxy backbuffer — needed by GenerateUIBuffer compute shader
+		D3D11_SHADER_RESOURCE_VIEW_DESC proxySrvDesc{};
+		proxySrvDesc.Format = texDesc11.Format;
+		proxySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		proxySrvDesc.Texture2D.MostDetailedMip = 0;
+		proxySrvDesc.Texture2D.MipLevels = 1;
+		swapChainBufferProxy->CreateSRV(proxySrvDesc);
+	}
 
 	swapChainBufferWrapped[0] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 	swapChainBufferWrapped[1] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
@@ -199,11 +209,35 @@ HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 {
-	// Copy proxy to wrapped resource
-	if (enbLoaded)
-		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxyENB->resource11);
+	auto upscalingForUI = Upscaling::GetSingleton();
+
+	// For DLSS-G: generate UI extraction buffer, then present the HUDLess (clean scene)
+	// to the swap chain instead of the full frame. DLSS-G warps whatever is in the swap chain,
+	// so presenting HUDLess prevents UI from being warped. UIColorAndAlpha tells DLSS-G
+	// to composite UI on top of both real and interpolated frames.
+	if (upscalingForUI->activeFrameGenType == Upscaling::FrameGenType::kDLSSG &&
+		upscalingForUI->setupBuffers && upscalingForUI->imagespaceComplete)
+	{
+		upscalingForUI->GenerateUIBuffer();
+
+		// Copy HUDLess (clean scene, no UI) to the D3D12 swap chain — NOT the proxy backbuffer
+		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11,
+			upscalingForUI->HUDLessBufferShared[frameIndex]->resource.get());
+
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::INFO("[FG] DLSS-G: presenting HUDLess to swap chain, UI composited via D3D12 compositor");
+			loggedOnce = true;
+		}
+	}
 	else
-		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource.get());
+	{
+		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before
+		if (enbLoaded)
+			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxyENB->resource11);
+		else
+			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource.get());
+	}
 
 	// Wait for D3D11 to finish
 	DX::ThrowIfFailed(d3d11Context->Signal(d3d11Fence.get(), fenceValue));
@@ -299,6 +333,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			upscaling->UIColorAlphaShared12[frameIndex].get(),
 			screenSize, jitter,
 			cameraNear, cameraFar, camera);
 
@@ -394,6 +429,10 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	// Fix FPS cap being e.g. 55 instead of 60
 	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
+
+	// Latch UI frame index for the compositor before Streamline's Present
+	// The real Present hook needs to know which UIColorAlpha buffer was last written
+	if (isDLSSGFrame) UICompositor::GetSingleton()->SetUIFrameIndex(frameIndex);
 
 	// Bracket Present with markers
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);

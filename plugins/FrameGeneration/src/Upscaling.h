@@ -35,15 +35,24 @@ public:
 	Texture2D* HUDLessBufferShared[2];
 	Texture2D* depthBufferShared[2];
 	Texture2D* motionVectorBufferShared[2];
-	
+	Texture2D* UIColorAlphaShared[2];
+
 	winrt::com_ptr<ID3D12Resource> HUDLessBufferShared12[2];
 	winrt::com_ptr<ID3D12Resource> depthBufferShared12[2];
 	winrt::com_ptr<ID3D12Resource> motionVectorBufferShared12[2];
+	winrt::com_ptr<ID3D12Resource> UIColorAlphaShared12[2];
 
 	ID3D11ComputeShader* copyDepthToSharedBufferCS = nullptr;
 	ID3D11ComputeShader* generateSharedBuffersCS = nullptr;
+	ID3D11ComputeShader* generateUIBufferCS = nullptr;
 
 	bool setupBuffers = false;
+
+	// OMSetRenderTargets hook for HUDLess capture
+	bool imagespaceComplete = false;
+	bool hudlessCapturedThisFrame = false;
+
+	void HookOMSetRenderTargets(ID3D11DeviceContext* a_context);
 
 	void LoadSettings();
 	void ReloadSettingsIfNeeded();
@@ -54,6 +63,7 @@ public:
 	void PreAlpha();
 	void PostAlpha();
 	void CopyBuffersToSharedResources();
+	void GenerateUIBuffer();
 
 	static void TimerSleepQPC(int64_t targetQPC);
 

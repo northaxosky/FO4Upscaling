@@ -113,10 +113,10 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 #endif
 
 	if (ENB_API::RequestENBAPI()) {
-		REX::INFO("[ENB] ENB detected - upscaling active with ENB compatibility");
+		REX::INFO("[ENB] ENB detected — native AA mode (DLAA/FSR)");
 		enbLoaded = true;
 	} else {
-		REX::INFO("[ENB] ENB not detected - full pipeline active");
+		REX::INFO("[ENB] ENB not detected — full pipeline active");
 	}
 
 	REX::INFO("[INIT] Installing DX11 hooks...");

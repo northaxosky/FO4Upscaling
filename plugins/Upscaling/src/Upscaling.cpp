@@ -956,14 +956,14 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	}
 
 	// ENB compatibility: sub-native upscaling causes viewport compounding with ENB's pipeline.
-	// Force disabled when ENB is active — DLAA (native-res AA) is not yet supported either.
+	// Native-resolution modes (DLAA / FSR Native AA) work since no render targets or viewports
+	// are modified. Quality mode is clamped to native AA in GetEffectiveQualityMode().
 	if (enbLoaded) {
-		static bool loggedENBFallback = false;
-		if (!loggedENBFallback) {
-			REX::INFO("[UPSCALE] ENB detected — upscaling disabled. Sub-native rendering not yet supported with ENB.");
-			loggedENBFallback = true;
+		static bool loggedENBActive = false;
+		if (!loggedENBActive) {
+			REX::INFO("[UPSCALE] ENB detected — running in native AA mode (DLAA/FSR). Sub-native quality modes are not available with ENB.");
+			loggedENBActive = true;
 		}
-		return UpscaleMethod::kDisabled;
 	}
 
 	static bool loggedOnce = false;
@@ -974,6 +974,14 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	}
 
 	return currentUpscaleMethod;
+}
+
+uint Upscaling::GetEffectiveQualityMode()
+{
+	if (enbLoaded && settings.qualityMode != 0) {
+		return 0;
+	}
+	return settings.qualityMode;
 }
 
 void Upscaling::CheckResources()
@@ -1105,7 +1113,8 @@ void Upscaling::UpdateUpscaling()
 
 	// Calculate render resolution scale from quality mode
 	// Example: Quality mode returns upscale ratio of ~1.5x, so resolutionScale = 1/1.5 = 0.67
-	float resolutionScale = upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)settings.qualityMode);
+	auto effectiveQuality = GetEffectiveQualityMode();
+	float resolutionScale = upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)effectiveQuality);
 
 	{
 		static float previousResolutionScale = -1.0f;
@@ -1178,14 +1187,14 @@ void Upscaling::Upscale()
 	winrt::com_ptr<ID3D11Resource> frameBufferResource;
 	frameBufferSRV->GetResource(frameBufferResource.put());
 
-	// Copy frame buffer to upscaling texture (input for DLSS/FSR)
-	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource.get());
-
 	static auto gameViewport = Util::State_GetSingleton();
 	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));
+
+	// Copy frame buffer to upscaling texture (input for DLSS/FSR)
+	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource.get());
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
@@ -1243,10 +1252,12 @@ void Upscaling::Upscale()
 	}
 
 	// Execute upscaling
-	if (upscaleMethod == UpscaleMethod::kDLSS)
-		Streamline::GetSingleton()->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, settings.qualityMode);
-	else if (upscaleMethod == UpscaleMethod::kFSR)
+	auto effectiveQuality = GetEffectiveQualityMode();
+	if (upscaleMethod == UpscaleMethod::kDLSS) {
+		Streamline::GetSingleton()->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
+	} else if (upscaleMethod == UpscaleMethod::kFSR) {
 		FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize, settings.sharpness);
+	}
 
 	// Copy upscaled result back to the frame buffer
 	context->CopyResource(frameBufferResource.get(), upscalingTexture->resource.get());

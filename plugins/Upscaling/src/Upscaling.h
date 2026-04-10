@@ -99,6 +99,15 @@ public:
 	UpscaleMethod GetUpscaleMethod(bool a_checkMenu);
 
 	/**
+	 * @brief Get quality mode, clamped for ENB compatibility
+	 * @return 0 (Native AA) when ENB is loaded, otherwise user's setting
+	 *
+	 * Sub-native quality modes cause viewport compounding through ENB's
+	 * D3D11 wrapper pipeline. Native AA (DLAA/FSR) works at 1:1 resolution.
+	 */
+	uint GetEffectiveQualityMode();
+
+	/**
 	 * @brief Process menu open/close events
 	 * @param a_event The menu event
 	 * @param a_source Event source (unused)

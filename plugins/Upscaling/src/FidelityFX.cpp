@@ -3,6 +3,7 @@
 #include "Upscaling.h"
 #include "Util.h"
 
+
 FfxResource ffxGetResource(ID3D11Resource* dx11Resource,
 	[[maybe_unused]] wchar_t const* ffxResName,
 	FfxResourceStates state /*=FFX_RESOURCE_STATE_COMPUTE_READ*/)
@@ -38,7 +39,7 @@ void FidelityFX::CreateFSRResources()
 	}
 	memset(fsrScratchBuffer, 0, scratchBufferSize);
 
-	FfxInterface fsrInterface;
+	FfxInterface fsrInterface{};
 	if (ffxGetInterfaceDX11(&fsrInterface, fsrDevice, fsrScratchBuffer, scratchBufferSize, FFX_FSR3UPSCALER_CONTEXT_COUNT) != FFX_OK) {
 		REX::CRITICAL("[FidelityFX] Failed to initialize FSR3 backend interface!");
 		free(fsrScratchBuffer);
@@ -46,7 +47,7 @@ void FidelityFX::CreateFSRResources()
 		return;
 	}
 
-	FfxFsr3ContextDescription contextDescription;
+	FfxFsr3ContextDescription contextDescription{};
 	contextDescription.maxRenderSize.width = gameViewport->screenWidth;
 	contextDescription.maxRenderSize.height = gameViewport->screenHeight;
 	contextDescription.maxUpscaleSize.width = gameViewport->screenWidth;
@@ -145,6 +146,7 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 {
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
 
 	auto& depthTexture = rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain];
 	auto& motionVectorTexture = rendererData->renderTargets[(uint)Util::RenderTarget::kMotionVectors];

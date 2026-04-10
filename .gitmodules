@@ -7,7 +7,7 @@
 	url = https://github.com/NVIDIA-RTX/Streamline.git
 [submodule "extern/FidelityFX-SDK"]
 	path = extern/FidelityFX-SDK
-	url = https://github.com/MapleHinata/FidelityFX-SDK.git
+	url = https://github.com/northaxosky/FidelityFX-SDK.git
 [submodule "extern/XeSS"]
 	path = extern/XeSS
 	url = https://github.com/intel/xess

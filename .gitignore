@@ -5,6 +5,7 @@
 /.local
 /.sdk-cache
 scripts/.env
+scripts/references/*.png
 
 # Third-party SDK runtime DLLs — downloaded by scripts/fetch-sdks.sh
 package/F4SE/Plugins/Streamline/*.dll

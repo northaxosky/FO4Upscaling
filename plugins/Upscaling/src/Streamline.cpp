@@ -233,7 +233,7 @@ void Streamline::UpdateConstants(float2 a_jitter)
 	slConstants.clipToPrevClip = {};
 	slConstants.depthInverted = sl::Boolean::eFalse;
 	slConstants.jitterOffset = { -a_jitter.x, -a_jitter.y};
-	slConstants.mvecScale = { 1, 1 };
+	slConstants.mvecScale = { 1, 1 };  // TODO(#20): verify mvec space — FSR uses renderSize scale, DLSS uses {1,1}
 	slConstants.prevClipToClip = {};
 	slConstants.reset = sl::Boolean::eFalse;
 	slConstants.motionVectors3D = sl::Boolean::eFalse;

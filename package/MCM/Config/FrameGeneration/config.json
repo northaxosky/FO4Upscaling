@@ -52,6 +52,15 @@
 			}
 		},
 		{
+			"id": "bDisableInMenus:Settings",
+			"text": "Disable in Menus",
+			"type": "switcher",
+			"help": "Disables frame generation when menus (Pip-Boy, etc.) are open. Reduces interpolation artifacts in menus but causes a brief hitch on menu open/close. (Default: On)",
+			"valueOptions": {
+				"sourceType": "ModSettingBool"
+			}
+		},
+		{
 			"id": "iFrameGenType:Settings",
 			"text": "Backend",
 			"type": "stepper",

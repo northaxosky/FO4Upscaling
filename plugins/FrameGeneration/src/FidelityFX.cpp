@@ -87,8 +87,9 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 	configParameters.allowAsyncWorkloads = true;
 	configParameters.flags = 0;
 
-	configParameters.generationRect.left = (dx12SwapChain->swapChainDesc.Width - dx12SwapChain->swapChainDesc.Width) / 2;
-	configParameters.generationRect.top = (dx12SwapChain->swapChainDesc.Height - dx12SwapChain->swapChainDesc.Height) / 2;
+	// Full-screen generation rect starts at origin
+	configParameters.generationRect.left = 0;
+	configParameters.generationRect.top = 0;
 	configParameters.generationRect.width = dx12SwapChain->swapChainDesc.Width;
 	configParameters.generationRect.height = dx12SwapChain->swapChainDesc.Height;
 

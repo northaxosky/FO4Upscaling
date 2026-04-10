@@ -167,7 +167,7 @@ struct DrawWorld_Render_PreUI_NVHBAO
 
 		if (requiresOverride) {
 			upscaling->ResetDepth();
-			upscaling->ResetRenderTargets({25});
+			upscaling->ResetRenderTargets({20});
 			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
@@ -637,7 +637,7 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 	// Replace all patched render targets with their scaled proxy versions
 	for (int i = 0; i < ARRAYSIZE(renderTargetsPatch); i++) {
 		int targetIndex = renderTargetsPatch[i];
-		bool shouldCopy = std::find(a_indicesToCopy.begin(), a_indicesToCopy.end(), targetIndex) != a_indicesToCopy.end();
+		bool shouldCopy = a_indicesToCopy.empty() || std::find(a_indicesToCopy.begin(), a_indicesToCopy.end(), targetIndex) != a_indicesToCopy.end();
 		OverrideRenderTarget(targetIndex, shouldCopy);
 	}
 
@@ -760,7 +760,7 @@ void Upscaling::OverrideDepth(bool a_doCopy)
 		static auto gameViewport = Util::State_GetSingleton();
 
 		// Only copy depth once per frame
-		static auto previousFrame = gameViewport->frameCount;
+		static decltype(gameViewport->frameCount) previousFrame = UINT_MAX;
 		if (previousFrame != gameViewport->frameCount)
 			CopyDepth();
 		previousFrame = gameViewport->frameCount;

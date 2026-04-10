@@ -155,7 +155,7 @@ public:
 	bool featureDLSS = false;       ///< True if DLSS is available on current GPU
 
 	sl::ViewportHandle viewport{ 0 };  ///< Streamline viewport handle
-	sl::FrameToken* frameToken;        ///< Current frame token for Streamline
+	sl::FrameToken* frameToken = nullptr;  ///< Current frame token for Streamline
 
 	HMODULE interposer = NULL;  ///< Handle to sl.interposer.dll
 

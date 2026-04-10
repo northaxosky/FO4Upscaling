@@ -66,6 +66,9 @@ static HRESULT WINAPI hk_CreateSwapChainForHwnd(IDXGIFactory2* This, IUnknown* p
 			(uintptr_t)realSC4, (uintptr_t)cmdQueue);
 	}
 
+	if (realSC4) realSC4->Release();
+	if (cmdQueue) cmdQueue->Release();
+
 	return hr;
 }
 
@@ -79,6 +82,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 
 	IDXGIAdapter* adapter = nullptr;
 	DX::ThrowIfFailed(dxgiDevice->GetAdapter(&adapter));
+	dxgiDevice->Release();
 
 	auto proxy = DX12SwapChain::GetSingleton();
 
@@ -87,6 +91,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	ID3D11DeviceContext* context;
 	a_device->GetImmediateContext(&context);
 	proxy->SetD3D11DeviceContext(context);
+	context->Release();
 
 	// For DLSS-G: init Streamline BEFORE D3D12 device
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
@@ -95,6 +100,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	}
 
 	proxy->CreateD3D12Device(adapter);
+	adapter->Release();
 
 	// XeSS-FG: create contexts after D3D12 device
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
@@ -226,6 +232,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				IDXGIAdapter* adapter = nullptr;
 				DX::ThrowIfFailed(dxgiDevice->GetAdapter(&adapter));
+				dxgiDevice->Release();
 
 				auto proxy = DX12SwapChain::GetSingleton();
 
@@ -234,6 +241,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				ID3D11DeviceContext* context;
 				(*ppDevice)->GetImmediateContext(&context);
 				proxy->SetD3D11DeviceContext(context);
+				context->Release();
 
 				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
@@ -242,6 +250,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				}
 
 				proxy->CreateD3D12Device(adapter);
+				adapter->Release();
 
 				// XeSS-FG: create contexts after D3D12 device, no device/factory upgrade needed
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {

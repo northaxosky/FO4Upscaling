@@ -203,7 +203,7 @@ public:
 
 	RE::BSGraphics::RenderTarget originalRenderTargets[101];      ///< Original full-resolution render targets
 	RE::BSGraphics::RenderTarget proxyRenderTargets[101];         ///< Scaled proxy render targets
-	RE::BSGraphics::RenderTargetProperties originalRenderTargetData[100];  ///< Original RT properties
+	RE::BSGraphics::RenderTargetProperties originalRenderTargetData[101];  ///< Original RT properties
 
 	// ========================================
 	// Sampler State Management

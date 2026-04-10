@@ -276,9 +276,12 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	bool isXeSSFrame = false;
 	static uint32_t xessFrameId = 0;
 
-	if (auto main = RE::Main::GetSingleton())
-		if (auto ui = RE::UI::GetSingleton())
-			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !main->inMenuMode && !ui->movementToDirectionalCount;
+	if (auto main = RE::Main::GetSingleton()) {
+		if (auto ui = RE::UI::GetSingleton()) {
+			bool menuBlock = upscaling->settings.disableInMenus && main->inMenuMode;
+			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !menuBlock && !ui->movementToDirectionalCount;
+		}
+	}
 
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
@@ -373,6 +376,10 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		auto xess = XeSSFG::GetSingleton();
 		int tagListIdx = (frameIndex + 1) % 2;
 
+		// NOTE: Resetting commandAllocators[tagListIdx] here without an explicit GPU fence wait.
+		// This is safe in practice because the tag list from the previous frame was submitted
+		// before Present, and the frame latency waitable object + Present sync guarantee the GPU
+		// has retired it by the time we reach this point in the next frame.
 		DX::ThrowIfFailed(commandAllocators[tagListIdx]->Reset());
 		DX::ThrowIfFailed(commandLists[tagListIdx]->Reset(commandAllocators[tagListIdx].get(), nullptr));
 
@@ -443,9 +450,12 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
-	// Wait for previous frame to have finished
+	// Wait for previous frame to have finished (handle may be null if swap chain
+	// was created without DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT —
+	// FSR3/DLSS-G wrapped swap chains manage latency internally)
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
-	WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
+	if (frameLatencyWaitableObject)
+		WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
 
 	// Update the frame index
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
@@ -457,8 +467,9 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (!upscaling->highFPSPhysicsFixLoaded)
 		upscaling->GameFrameLimiter();
 
-	// If VSync is disabled, use frame limiter to prevent tearing and optimize pacing
-	if (SyncInterval == 0)
+	// If VSync is disabled and HighFPSPhysicsFix isn't handling pacing, use our limiter.
+	// Skip when HFPF is loaded — it handles pacing correctly including loading screens.
+	if (SyncInterval == 0 && !upscaling->highFPSPhysicsFixLoaded)
 		upscaling->FrameLimiter(useFrameGenerationThisFrame);
 
 	return S_OK;

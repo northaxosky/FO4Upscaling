@@ -87,8 +87,8 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 	// Compiler setup
 	uint32_t flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
 
-	ID3DBlob* shaderBlob;
-	ID3DBlob* shaderErrors;
+	ID3DBlob* shaderBlob = nullptr;
+	ID3DBlob* shaderErrors = nullptr;
 
 	std::string str;
 	std::wstring path{ FilePath };
@@ -101,13 +101,18 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 	}
 	if (FAILED(D3DCompileFromFile(FilePath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, Program, ProgramType, flags, 0, &shaderBlob, &shaderErrors))) {
 		REX::WARN("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
+		if (shaderErrors) shaderErrors->Release();
+		if (shaderBlob) shaderBlob->Release();
 		return nullptr;
 	}
-	if (shaderErrors)
+	if (shaderErrors) {
 		REX::DEBUG("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
+		shaderErrors->Release();
+	}
 
 	ID3D11ComputeShader* regShader;
 	DX::ThrowIfFailed(device->CreateComputeShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &regShader));
+	shaderBlob->Release();
 	return regShader;
 }
 
@@ -121,6 +126,7 @@ void Upscaling::LoadSettings()
 
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
+	settings.disableInMenus = ini.GetBoolValue("Settings", "bDisableInMenus", true);
 	settings.debugLogging = ini.GetBoolValue("Settings", "bEnableDebugLogging", false);
 	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
 	// MCM stepper is 0-indexed (0=2x, 1=3x, 2=4x) but we store as numFramesToGenerate (1, 2, 3)

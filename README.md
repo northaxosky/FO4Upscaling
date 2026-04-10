@@ -9,7 +9,7 @@ Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearM
 | Plugin | DLL | Description |
 |--------|-----|-------------|
 | **AAAFrameGeneration** | `AAAFrameGeneration.dll` | Frame generation with FSR3 (AMD), DLSS-G (NVIDIA RTX 40+), and XeSS-FG (Intel/cross-vendor) via D3D11/D3D12 interop |
-| **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline |
+| **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline. ENB compatible (native AA mode). |
 | **MotionVectorFixes** | `MotionVectorFixes.dll` | Standalone fixes for broken motion vectors (weapon ghosting, menu ghosting, animated objects) |
 
 ## Frame Generation
@@ -23,6 +23,12 @@ The FrameGeneration plugin supports three backends, configurable via MCM or `Fra
 | **XeSS-FG** | `iFrameGenType=2` | Any SM 6.4 GPU | Intel XeSS Frame Generation (multi-frame on Intel Arc) |
 
 All backends use D3D11-to-D3D12 interop (game renders D3D11, frame gen runs D3D12). If the selected backend isn't available at runtime, it falls back to FSR3 automatically.
+
+## ENB Compatibility
+
+When ENBSeries is detected, the Upscaling plugin runs in **native AA mode** (DLAA for DLSS, Native AA for FSR). Sub-native quality modes are not available with ENB because the render target proxy system causes viewport compounding through ENB's D3D11 wrapper pipeline. Native AA provides temporal anti-aliasing at full resolution — better quality than the game's built-in TAA with no performance cost from upscaling.
+
+Frame generation works with ENB across all backends (FSR3, DLSS-G, XeSS-FG).
 
 ## Requirements
 

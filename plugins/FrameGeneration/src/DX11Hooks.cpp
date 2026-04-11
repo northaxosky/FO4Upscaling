@@ -12,8 +12,43 @@
 #include "ENB/ENBSeriesAPI.h"
 #include "XeSSFG.h"
 #include "UICompositor.h"
+#include "SimpleIni.h"
+
+// Quality mode → upscale ratio (same as ffxFsr3GetUpscaleRatioFromQualityMode)
+static float GetUpscaleRatioFromQualityMode(int qualityMode)
+{
+	switch (qualityMode) {
+	case 0: return 1.0f;   // Native AA / DLAA
+	case 1: return 1.5f;   // Quality
+	case 2: return 1.7f;   // Balanced
+	case 3: return 2.0f;   // Performance
+	case 4: return 3.0f;   // Ultra Performance
+	default: return 1.0f;
+	}
+}
 
 bool enbLoaded = false;
+
+// ENB sub-native upscaling: the game + ENB see render-res, we present at display-res
+uint32_t enbDisplayWidth = 0;
+uint32_t enbDisplayHeight = 0;
+uint32_t enbRenderWidth = 0;
+uint32_t enbRenderHeight = 0;
+bool enbSubNative = false;
+
+// GetClientRect hook — makes the game think the window is render-res
+static decltype(&GetClientRect) ptrGetClientRect = nullptr;
+static HWND gameHwnd = nullptr;
+
+static BOOL WINAPI hk_GetClientRect(HWND hWnd, LPRECT lpRect)
+{
+	BOOL result = ptrGetClientRect(hWnd, lpRect);
+	if (result && enbSubNative && hWnd == gameHwnd && lpRect) {
+		lpRect->right = lpRect->left + enbRenderWidth;
+		lpRect->bottom = lpRect->top + enbRenderHeight;
+	}
+	return result;
+}
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;
 decltype(&IDXGIFactory::CreateSwapChain) ptrCreateSwapChain;
@@ -212,6 +247,39 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			FeatureLevels = 1;
 
 			if (enbLoaded) {
+				// ENB sub-native: read quality mode from Upscaling plugin's INI to determine render resolution
+				CSimpleIniA ini;
+				ini.SetUnicode();
+				ini.LoadFile("Data\\MCM\\Settings\\Upscaling.ini");
+				int qualityMode = static_cast<int>(ini.GetLongValue("Settings", "iQualityMode", 0));
+				int upscaleMethodPref = static_cast<int>(ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2));
+
+				// Store display resolution before any modification
+				enbDisplayWidth = pSwapChainDesc->BufferDesc.Width;
+				enbDisplayHeight = pSwapChainDesc->BufferDesc.Height;
+
+				if (qualityMode > 0 && upscaleMethodPref > 0) {
+					// Compute render resolution from quality mode
+					float upscaleRatio = GetUpscaleRatioFromQualityMode(qualityMode);
+					enbRenderWidth = static_cast<uint32_t>(static_cast<float>(enbDisplayWidth) / upscaleRatio);
+					enbRenderHeight = static_cast<uint32_t>(static_cast<float>(enbDisplayHeight) / upscaleRatio);
+					enbSubNative = true;
+
+					// Capture game HWND for GetClientRect hook
+					gameHwnd = pSwapChainDesc->OutputWindow;
+
+					// Modify swap chain desc so ENB sees render-res
+					pSwapChainDesc->BufferDesc.Width = enbRenderWidth;
+					pSwapChainDesc->BufferDesc.Height = enbRenderHeight;
+
+					REX::INFO("[ENB] Sub-native upscaling: display={}x{}, render={}x{} (quality={}, ratio={:.2f})",
+						enbDisplayWidth, enbDisplayHeight, enbRenderWidth, enbRenderHeight, qualityMode, upscaleRatio);
+				} else {
+					enbRenderWidth = enbDisplayWidth;
+					enbRenderHeight = enbDisplayHeight;
+					REX::INFO("[ENB] Native AA mode: {}x{}", enbDisplayWidth, enbDisplayHeight);
+				}
+
 				*(uintptr_t*)&ptrCreateSwapChain = Detours::X64::DetourClassVTable(*(uintptr_t*)dxgiFactory, &hk_IDXGIFactory_CreateSwapChain, 10);
 			}
 			else {
@@ -353,6 +421,13 @@ void DX11Hooks::Install()
 	}
 
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
+
+	// Hook GetClientRect BEFORE D3D11 device creation — the game queries window size during init.
+	// When ENB sub-native, this makes the game think the window is render-res.
+	if (enbLoaded) {
+		(uintptr_t&)ptrGetClientRect = Detours::IATHook(moduleBase, "USER32.dll", "GetClientRect", (uintptr_t)hk_GetClientRect);
+		REX::INFO("[ENB] GetClientRect IAT hook installed");
+	}
 
 	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
 }

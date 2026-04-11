@@ -955,13 +955,15 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 		currentUpscaleMethod = UpscaleMethod::kFSR;
 	}
 
-	// ENB compatibility: sub-native upscaling causes viewport compounding with ENB's pipeline.
-	// Native-resolution modes (DLAA / FSR Native AA) work since no render targets or viewports
-	// are modified. Quality mode is clamped to native AA in GetEffectiveQualityMode().
+	// ENB compatibility: FrameGeneration plugin modifies the swap chain desc to render-res,
+	// so the game + ENB both see render-res. Upscaling happens at Present time in FrameGen.
 	if (enbLoaded) {
 		static bool loggedENBActive = false;
 		if (!loggedENBActive) {
-			REX::INFO("[UPSCALE] ENB detected — running in native AA mode (DLAA/FSR). Sub-native quality modes are not available with ENB.");
+			if (settings.qualityMode > 0)
+				REX::INFO("[UPSCALE] ENB detected — sub-native mode via swap chain proxy (quality={})", settings.qualityMode);
+			else
+				REX::INFO("[UPSCALE] ENB detected — native AA mode (DLAA/FSR)");
 			loggedENBActive = true;
 		}
 	}
@@ -978,7 +980,10 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 
 uint Upscaling::GetEffectiveQualityMode()
 {
-	if (enbLoaded && settings.qualityMode != 0) {
+	// ENB sub-native: the game renders at render-res natively (swap chain desc modified).
+	// FSR/DLSS runs in native AA mode (quality=0) for temporal reconstruction at render-res.
+	// The resolution reduction comes from the swap chain, not from the upscaler quality mode.
+	if (enbLoaded && settings.qualityMode > 0) {
 		return 0;
 	}
 	return settings.qualityMode;
@@ -1116,25 +1121,64 @@ void Upscaling::UpdateUpscaling()
 	auto effectiveQuality = GetEffectiveQualityMode();
 	float resolutionScale = upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)effectiveQuality);
 
+	// ENB sub-native: the game IS rendering at render-res (swap chain was created at render-res).
+	// No render target proxies or dynamic resolution needed — the game sees render-res as native.
+	// Upscaling happens at Present time in FrameGeneration plugin.
+	bool enbSubNativeMode = enbLoaded && settings.qualityMode > 0 && upscaleMethodNoMenu != UpscaleMethod::kDisabled;
+
 	{
 		static float previousResolutionScale = -1.0f;
 		if (previousResolutionScale != resolutionScale) {
-			REX::INFO("[RES] Resolution scale changed: {:.4f} -> {:.4f} (qualityMode={}, enbLoaded={}, method={})",
-				previousResolutionScale, resolutionScale, settings.qualityMode, enbLoaded, static_cast<uint>(upscaleMethodNoMenu));
+			REX::INFO("[RES] Resolution scale changed: {:.4f} -> {:.4f} (qualityMode={}, enbLoaded={}, method={}, enbSubNative={})",
+				previousResolutionScale, resolutionScale, settings.qualityMode, enbLoaded, static_cast<uint>(upscaleMethodNoMenu), enbSubNativeMode);
 			previousResolutionScale = resolutionScale;
 		}
 	}
 
-	// Calculate mipmap LOD bias
-	// Example: 0.67 scale -> log2(0.67) = -0.58
+	// Mip bias: apply based on the actual quality mode ratio regardless of ENB mode
 	float currentMipBias = std::log2f(resolutionScale);
-
 	if (upscaleMethodNoMenu == UpscaleMethod::kDLSS || upscaleMethodNoMenu == UpscaleMethod::kFSR)
 		currentMipBias -= 1.0f;
 
 	UpdateSamplerStates(currentMipBias);
-	UpdateRenderTargets(resolutionScale, resolutionScale);
 	UpdateGameSettings();
+
+	if (enbSubNativeMode) {
+		// ENB sub-native: game already renders at render-res via swap chain desc.
+		// Skip render target proxies and dynamic resolution — they're not needed.
+		// But DO apply jitter and run FSR/DLSS in native AA mode (quality=0) for
+		// temporal reconstruction at render-res. This gives much better quality
+		// than raw render because of temporal accumulation and anti-aliasing.
+		resolutionScale = 1.0f;
+		UpdateRenderTargets(1.0f, 1.0f);
+		originalDynamicHeightRatio = 1.0f;
+		originalDynamicWidthRatio = 1.0f;
+		Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
+
+		// Apply jitter for temporal AA at render-res
+		if (upscaleMethod != UpscaleMethod::kDisabled) {
+			auto screenWidth = gameViewport->screenWidth;
+			auto screenHeight = gameViewport->screenHeight;
+			auto phaseCount = ffxFsr3GetJitterPhaseCount(screenWidth, screenWidth);
+			ffxFsr3GetJitterOffset(&jitter.x, &jitter.y, gameViewport->frameCount, phaseCount);
+
+			gameViewport->offsetX = 2.0f * -jitter.x / static_cast<float>(screenWidth);
+			gameViewport->offsetY = 2.0f * jitter.y / static_cast<float>(screenHeight);
+
+			static bool loggedFirstJitter = false;
+			if (!loggedFirstJitter) {
+				REX::INFO("[UPSCALE] ENB sub-native: jitter enabled for temporal AA at {}x{}, phaseCount={}",
+					screenWidth, screenHeight, phaseCount);
+				loggedFirstJitter = true;
+			}
+		}
+
+		CheckResources();
+		// Fall through to normal frame processing — Upscale() runs in native AA mode
+		return;
+	}
+
+	UpdateRenderTargets(resolutionScale, resolutionScale);
 
 	// Disable upscaling when certain menus are open (Pip-Boy, Examine, Loading)
 	if (upscaleMethod == UpscaleMethod::kDisabled) {
@@ -1175,6 +1219,10 @@ void Upscaling::Upscale()
 {
 	if (upscaleMethod == UpscaleMethod::kDisabled)
 		return;
+
+	// ENB sub-native: run FSR/DLSS in native AA mode (quality=0) at render-res.
+	// This gives temporal reconstruction (jitter accumulation, anti-aliasing) without
+	// trying to change resolution. The game already renders at render-res.
 
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);

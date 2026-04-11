@@ -9,6 +9,8 @@
 #include "Upscaling.h"
 #include "XeSSFG.h"
 
+#include <d3dcompiler.h>
+
 extern bool enbLoaded;
 
 [[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
@@ -49,8 +51,26 @@ void DX12SwapChain::CreateD3D12CommandQueues()
 
 void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
 {
+	// Access ENB sub-native state from DX11Hooks
+	extern bool enbSubNative;
+	extern uint32_t enbDisplayWidth, enbDisplayHeight;
+	extern uint32_t enbRenderWidth, enbRenderHeight;
+
+	enbSubNativeActive = enbSubNative;
+	if (enbSubNativeActive) {
+		displayWidth = enbDisplayWidth;
+		displayHeight = enbDisplayHeight;
+		// D3D12 swap chain at render-res — DXGI stretches to window automatically
+		REX::INFO("[FG] ENB sub-native: D3D12 swap chain + shared at {}x{} (render-res), window at {}x{}",
+			enbRenderWidth, enbRenderHeight, displayWidth, displayHeight);
+	} else {
+		displayWidth = a_swapChainDesc.BufferDesc.Width;
+		displayHeight = a_swapChainDesc.BufferDesc.Height;
+	}
+
 	swapChainDesc = {};
 	swapChainDesc.BufferCount = 2;
+	// Use render-res for ENB sub-native — DXGI stretches to window; native-res otherwise
 	swapChainDesc.Width = a_swapChainDesc.BufferDesc.Width;
 	swapChainDesc.Height = a_swapChainDesc.BufferDesc.Height;
 	swapChainDesc.Format = a_swapChainDesc.BufferDesc.Format;
@@ -151,36 +171,42 @@ void DX12SwapChain::CreateInterop()
 	DX::ThrowIfFailed(d3d11Device->OpenSharedFence(sharedFenceHandle, IID_PPV_ARGS(&d3d11Fence)));
 	CloseHandle(sharedFenceHandle);
 
-	D3D11_TEXTURE2D_DESC texDesc11{};
-	texDesc11.Width = swapChainDesc.Width;
-	texDesc11.Height = swapChainDesc.Height;
-	texDesc11.MipLevels = 1;
-	texDesc11.ArraySize = 1;
-	texDesc11.Format = swapChainDesc.Format;
-	texDesc11.SampleDesc.Count = 1;
-	texDesc11.SampleDesc.Quality = 0;
-	texDesc11.Usage = D3D11_USAGE_DEFAULT;
-	texDesc11.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-	texDesc11.CPUAccessFlags = 0;
-	texDesc11.MiscFlags = 0;
+	// Display-res desc for shared wrapped textures (D3D12 swap chain size)
+	D3D11_TEXTURE2D_DESC displayTexDesc{};
+	displayTexDesc.Width = swapChainDesc.Width;
+	displayTexDesc.Height = swapChainDesc.Height;
+	displayTexDesc.MipLevels = 1;
+	displayTexDesc.ArraySize = 1;
+	displayTexDesc.Format = swapChainDesc.Format;
+	displayTexDesc.SampleDesc.Count = 1;
+	displayTexDesc.SampleDesc.Quality = 0;
+	displayTexDesc.Usage = D3D11_USAGE_DEFAULT;
+	displayTexDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+	displayTexDesc.CPUAccessFlags = 0;
+	displayTexDesc.MiscFlags = 0;
 
-	// Create interop textures
+	// Create proxy backbuffer (what the game renders into)
 	if (enbLoaded) {
-		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
+		// ENB sub-native: everything at render-res (swap chain desc already has render-res dims)
+		swapChainBufferProxyENB = new WrappedResource(displayTexDesc, d3d11Device.get(), d3d12Device.get());
+		if (enbSubNativeActive) {
+			REX::INFO("[FG] CreateInterop: all at {}x{} (render-res), DXGI stretches to window",
+				displayTexDesc.Width, displayTexDesc.Height);
+		}
 	} else {
-		swapChainBufferProxy = new Texture2D(texDesc11);
+		swapChainBufferProxy = new Texture2D(displayTexDesc);
 
-		// Create SRV for the proxy backbuffer — needed by GenerateUIBuffer compute shader
 		D3D11_SHADER_RESOURCE_VIEW_DESC proxySrvDesc{};
-		proxySrvDesc.Format = texDesc11.Format;
+		proxySrvDesc.Format = displayTexDesc.Format;
 		proxySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 		proxySrvDesc.Texture2D.MostDetailedMip = 0;
 		proxySrvDesc.Texture2D.MipLevels = 1;
 		swapChainBufferProxy->CreateSRV(proxySrvDesc);
 	}
 
-	swapChainBufferWrapped[0] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
-	swapChainBufferWrapped[1] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
+	// Shared wrapped textures always at display-res (for D3D12 swap chain)
+	swapChainBufferWrapped[0] = new WrappedResource(displayTexDesc, d3d11Device.get(), d3d12Device.get());
+	swapChainBufferWrapped[1] = new WrappedResource(displayTexDesc, d3d11Device.get(), d3d12Device.get());
 }
 
 DXGISwapChainProxy* DX12SwapChain::GetSwapChainProxy()
@@ -205,6 +231,50 @@ HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 	else
 		*ppSurface = swapChainBufferProxy->resource.get();
 	return S_OK;
+}
+
+void DX12SwapChain::CompileUpscaleShader()
+{
+	if (upscaleColorCS)
+		return;
+
+	const wchar_t* shaderPath = L"Data\\F4SE\\Plugins\\FrameGeneration\\UpscaleColorCS.hlsl";
+	if (!std::filesystem::exists(shaderPath)) {
+		REX::ERROR("[ENB] UpscaleColorCS.hlsl not found, cannot upscale");
+		return;
+	}
+
+	uint32_t flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
+	ID3DBlob* shaderBlob = nullptr;
+	ID3DBlob* shaderErrors = nullptr;
+
+	if (FAILED(D3DCompileFromFile(shaderPath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "cs_5_0", flags, 0, &shaderBlob, &shaderErrors))) {
+		REX::ERROR("[ENB] UpscaleColorCS compilation failed: {}",
+			shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown");
+		if (shaderErrors) shaderErrors->Release();
+		if (shaderBlob) shaderBlob->Release();
+		return;
+	}
+	if (shaderErrors) shaderErrors->Release();
+
+	DX::ThrowIfFailed(d3d11Device->CreateComputeShader(
+		shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &upscaleColorCS));
+	shaderBlob->Release();
+
+	REX::INFO("[ENB] UpscaleColorCS compiled successfully");
+}
+
+void DX12SwapChain::UpscaleAndCopyToShared(UINT a_frameIndex)
+{
+	// ENB sub-native: all textures are the same render-res, direct copy (same as native-AA path)
+	// DXGI handles the stretch from render-res D3D12 swap chain to the display-res window
+	d3d11Context->CopyResource(swapChainBufferWrapped[a_frameIndex]->resource11, swapChainBufferProxyENB->resource11);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[ENB] Present: direct copy from proxy to shared (render-res), DXGI stretches to window");
+		loggedOnce = true;
+	}
 }
 
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
@@ -233,10 +303,14 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	else
 	{
 		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before
-		if (enbLoaded)
+		if (enbLoaded && enbSubNativeActive && upscaledTexture) {
+			// ENB sub-native: upscale render-res proxy → display-res intermediate → shared texture
+			UpscaleAndCopyToShared(frameIndex);
+		} else if (enbLoaded) {
 			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxyENB->resource11);
-		else
+		} else {
 			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource.get());
+		}
 	}
 
 	// Wait for D3D11 to finish

@@ -9,7 +9,7 @@ Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearM
 | Plugin | DLL | Description |
 |--------|-----|-------------|
 | **AAAFrameGeneration** | `AAAFrameGeneration.dll` | Frame generation with FSR3 (AMD), DLSS-G (NVIDIA RTX 40+), and XeSS-FG (Intel/cross-vendor) via D3D11/D3D12 interop |
-| **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline. ENB compatible (sub-native + native AA). |
+| **Upscaling** | `Upscaling.dll` | Spatial upscaling with AMD FSR3 and NVIDIA DLSS via Streamline. ENB compatible (native AA mode). |
 | **MotionVectorFixes** | `MotionVectorFixes.dll` | Standalone fixes for broken motion vectors (weapon ghosting, menu ghosting, animated objects) |
 
 ## Frame Generation
@@ -26,13 +26,9 @@ All backends use D3D11-to-D3D12 interop (game renders D3D11, frame gen runs D3D1
 
 ## ENB Compatibility
 
-ENBSeries is fully supported. When ENB is detected:
+When ENBSeries is detected, the Upscaling plugin runs in **native AA mode** (DLAA for DLSS, Native AA for FSR). Sub-native quality modes are not available with ENB because the render target proxy system causes viewport compounding through ENB's D3D11 wrapper pipeline. Native AA provides temporal anti-aliasing at full resolution — better quality than the game's built-in TAA with no performance cost from upscaling.
 
-- **Sub-native quality modes** (Quality, Balanced, Performance) reduce the game's internal rendering resolution for better performance. The FrameGeneration plugin modifies the swap chain resolution before ENB initializes, so ENB sees the reduced resolution and applies its effects correctly. DLSS/FSR provides temporal anti-aliasing at render resolution, and DXGI stretches the result to your display resolution.
-- **Native AA mode** (DLAA/FSR Native AA) runs at full resolution with temporal anti-aliasing only — no resolution reduction.
-- **Frame generation** works with ENB across all backends (FSR3, DLSS-G, XeSS-FG).
-
-> **Note:** Sub-native modes with ENB use DXGI bilinear stretching for the final upscale rather than FSR/DLSS temporal upscaling. This means slightly softer image quality compared to non-ENB upscaling. Temporal AA at render resolution still provides significantly better quality than no upscaling. Full temporal upscaling with ENB is planned for a future release.
+Frame generation works with ENB across all backends (FSR3, DLSS-G, XeSS-FG).
 
 ## Requirements
 

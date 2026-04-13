@@ -95,13 +95,6 @@ public:
 
 	DXGISwapChainProxy* swapChainProxy = nullptr;
 
-	// ENB sub-native: proxy backbuffer is render-res, D3D12 swap chain is display-res
-	uint32_t displayWidth = 0;
-	uint32_t displayHeight = 0;
-	bool enbSubNativeActive = false;
-	std::unique_ptr<Texture2D> upscaledTexture;  // display-res intermediate for Present-time upscaling
-	ID3D11ComputeShader* upscaleColorCS = nullptr;
-
 	void CreateD3D12Device(IDXGIAdapter* a_adapter);
 	void CreateD3D12CommandQueues();
 	void CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC swapChainDesc);
@@ -118,7 +111,4 @@ public:
 	HRESULT GetBuffer(void** ppSurface);
 	HRESULT Present(UINT SyncInterval, UINT Flags);
 	HRESULT GetDevice(_In_ REFIID riid, _COM_Outptr_ void** ppDevice);
-
-	void CompileUpscaleShader();
-	void UpscaleAndCopyToShared(UINT a_frameIndex);
 };

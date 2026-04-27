@@ -1,5 +1,7 @@
 # FO4Upscaling
 
+[![Build](https://github.com/northaxosky/FO4Upscaling/actions/workflows/build.yml/badge.svg)](https://github.com/northaxosky/FO4Upscaling/actions/workflows/build.yml)
+
 F4SE plugins for Fallout 4 providing frame generation and spatial upscaling.
 
 Fork of [doodlum/fo4test](https://github.com/doodlum/fo4test) migrated to [DearModdingFO4 CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4) for single-DLL multi-runtime support (OG/NG/AE).

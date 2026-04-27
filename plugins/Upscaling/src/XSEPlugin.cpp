@@ -101,7 +101,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	bool debugLogging = ini.GetBoolValue("Settings", "bEnableDebugLogging", false);
 
 	F4SE::InitInfo initInfo{};
-	initInfo.logLevel = debugLogging ? REX::LOG_LEVEL::DEBUG : REX::LOG_LEVEL::INFO;
+	initInfo.logLevel = debugLogging ? REX::ELogLevel::Debug : REX::ELogLevel::Info;
 	initInfo.trampoline = true;
 	initInfo.trampolineSize = 1 << 10;
 	F4SE::Init(a_f4se, initInfo);

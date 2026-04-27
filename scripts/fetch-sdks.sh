@@ -10,7 +10,7 @@ PACKAGE_DIR="$PROJECT_ROOT/package"
 TEMP_DIR="$PROJECT_ROOT/.sdk-cache"
 
 # SDK versions — update these when upgrading
-STREAMLINE_VERSION="v2.10.3"
+STREAMLINE_VERSION="v2.11.1"
 FIDELITYFX_VERSION="v1.1.4"
 
 STREAMLINE_URL="https://github.com/NVIDIA-RTX/Streamline/releases/download/${STREAMLINE_VERSION}/streamline-sdk-${STREAMLINE_VERSION}.zip"

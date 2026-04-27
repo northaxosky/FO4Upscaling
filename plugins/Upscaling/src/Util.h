@@ -106,7 +106,7 @@ namespace Util
 		rtm->isDynamicResolutionCurrentlyActivated = activated;
 
 		// Also write to the game's actual offsets (no-pad layout)
-		if (REL::Module::IsRuntimeOG()) {
+		if (REX::FModule::IsRuntimeOG()) {
 			auto base = reinterpret_cast<uintptr_t>(rtm);
 			*reinterpret_cast<float*>(base + GAME_DYNAMIC_WIDTH_RATIO_OFFSET) = width;
 			*reinterpret_cast<float*>(base + GAME_DYNAMIC_HEIGHT_RATIO_OFFSET) = height;
@@ -116,7 +116,7 @@ namespace Util
 
 	static float GetGameDynamicWidthRatio(RE::BSGraphics::RenderTargetManager* rtm)
 	{
-		if (REL::Module::IsRuntimeOG()) {
+		if (REX::FModule::IsRuntimeOG()) {
 			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + GAME_DYNAMIC_WIDTH_RATIO_OFFSET);
 		}
 		return rtm->dynamicWidthRatio;
@@ -124,7 +124,7 @@ namespace Util
 
 	static float GetGameDynamicHeightRatio(RE::BSGraphics::RenderTargetManager* rtm)
 	{
-		if (REL::Module::IsRuntimeOG()) {
+		if (REX::FModule::IsRuntimeOG()) {
 			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + GAME_DYNAMIC_HEIGHT_RATIO_OFFSET);
 		}
 		return rtm->dynamicHeightRatio;

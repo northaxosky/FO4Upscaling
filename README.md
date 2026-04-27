@@ -63,7 +63,7 @@ Third-party runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS) are not
 
 | SDK | Version | DLLs | Source |
 |-----|---------|------|--------|
-| NVIDIA Streamline | v2.10.3 | sl.interposer, sl.dlss_g, sl.reflex, etc. | [GitHub release](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.3) |
+| NVIDIA Streamline | v2.11.1 | sl.interposer, sl.dlss_g, sl.reflex, etc. | [GitHub release](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.11.1) |
 | AMD FidelityFX | v1.1.4 | amd_fidelityfx_dx12.dll | [GitHub release](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/v1.1.4) |
 | Intel XeSS | submodule | libxess_fg.dll, libxell.dll | Copied from `extern/XeSS/bin/` |
 
@@ -104,7 +104,7 @@ include/                 # Shared headers (PCH, ENB SDK, Detours)
 extern/
   CommonLibF4/           # DearModdingFO4 (address-independent, all runtimes)
   FidelityFX-SDK/        # AMD FSR3 SDK
-  Streamline/            # NVIDIA Streamline SDK v2.10.3 (DLSS, DLSS-G, Reflex)
+  Streamline/            # NVIDIA Streamline SDK v2.11.1 (DLSS, DLSS-G, Reflex)
   XeSS/                  # Intel XeSS SDK (XeSS-FG, XeLL)
 package/
   F4SE/Plugins/          # Runtime files (HLSL shaders, INI configs)

@@ -287,7 +287,7 @@ void Upscaling::InstallHooks()
 	// Disable TAA shader if using alternative scaling method
 	stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(RE::VTABLE::ImageSpaceEffectTemporalAA[0]);
 
-	auto runtimeIdx = static_cast<std::uint8_t>(REL::Module::GetRuntimeIndex());
+	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 	REX::INFO("[HOOK] Runtime index: {}", runtimeIdx);
 
 	// Control jitters, dynamic resolution, sampler states, and render targets

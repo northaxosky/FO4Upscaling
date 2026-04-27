@@ -6,6 +6,7 @@
 #pragma warning(push)
 #include "F4SE/F4SE.h"
 #include "RE/Fallout.h"
+#include "REX/FModule.h"
 #include "REX/REX/Singleton.h"
 #pragma warning(pop)
 

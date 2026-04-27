@@ -23,6 +23,18 @@ set(FFX_FSR ON)
 set(FFX_AUTO_COMPILE_SHADERS 1)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/FidelityFX-SDK/sdk ${CMAKE_CURRENT_BINARY_DIR}/FidelityFX-SDK)
 
+foreach(FFX_TARGET
+		ffx_backend_dx11_x64
+		ffx_frameinterpolation_x64
+		ffx_fsr3_x64
+		ffx_fsr3upscaler_x64
+		ffx_opticalflow_x64
+		ffx_spd_x64)
+	if(TARGET ${FFX_TARGET})
+		target_compile_options(${FFX_TARGET} PRIVATE /WX-)
+	endif()
+endforeach()
+
 # Streamline (NVIDIA DLSS)
 add_subdirectory(${CMAKE_SOURCE_DIR}/cmake/Streamline ${CMAKE_CURRENT_BINARY_DIR}/Streamline)
 

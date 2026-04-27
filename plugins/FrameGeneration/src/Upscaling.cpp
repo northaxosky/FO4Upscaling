@@ -718,7 +718,7 @@ struct DrawWorld_Reticle
 
 void Upscaling::InstallHooks()
 {
-	auto runtimeIdx = static_cast<std::uint8_t>(REL::Module::GetRuntimeIndex());
+	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 
 	// Fix game initialising twice
 	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));

@@ -1,4 +1,5 @@
 name: Build
+# Runs on pushes, pull requests, and manual dispatches.
 
 on:
   workflow_dispatch:
@@ -40,6 +41,7 @@ jobs:
         run: cmake -S . --preset=default
 
       - name: Build
+# Runs on pushes, pull requests, and manual dispatches.
         run: cmake --build build --config Release
 
       - name: Fetch SDK runtime DLLs

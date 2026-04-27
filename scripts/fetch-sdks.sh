@@ -9,27 +9,54 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PACKAGE_DIR="$PROJECT_ROOT/package"
 TEMP_DIR="$PROJECT_ROOT/.sdk-cache"
 
-# SDK versions — update these when upgrading
-STREAMLINE_VERSION="v2.11.1"
-FIDELITYFX_VERSION="v1.1.4"
-
-STREAMLINE_URL="https://github.com/NVIDIA-RTX/Streamline/releases/download/${STREAMLINE_VERSION}/streamline-sdk-${STREAMLINE_VERSION}.zip"
-FIDELITYFX_URL="https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/download/${FIDELITYFX_VERSION}/FidelityFX-SDK-${FIDELITYFX_VERSION}.zip"
+source "$SCRIPT_DIR/sdk-manifest.sh"
 
 mkdir -p "$TEMP_DIR"
 
+sha256_file() {
+    local file="$1"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{ print tolower($1) }'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{ print tolower($1) }'
+    else
+        echo "ERROR: sha256sum or shasum is required to verify SDK archives" >&2
+        exit 1
+    fi
+}
+
+verify_archive() {
+    local file="$1"
+    local expected="$2"
+    local actual
+
+    actual="$(sha256_file "$file")"
+    if [ "$actual" != "$expected" ]; then
+        rm -f "$file"
+        echo "ERROR: SHA256 mismatch for $file" >&2
+        echo "  expected: $expected" >&2
+        echo "  actual:   $actual" >&2
+        exit 1
+    fi
+}
+
+fetch_archive() {
+    local name="$1"
+    local url="$2"
+    local expected_sha256="$3"
+    local output="$4"
+
+    if [ ! -f "$output" ]; then
+        echo "  Downloading $name..."
+        curl -fSL "$url" -o "$output" || { echo "ERROR: Failed to download $url"; exit 1; }
+    fi
+
+    verify_archive "$output" "$expected_sha256"
+}
+
 # ─── Streamline (NVIDIA DLSS-G) ──────────────────────────────────────────────
 STREAMLINE_DEST="$PACKAGE_DIR/F4SE/Plugins/Streamline"
-STREAMLINE_DLLS=(
-    sl.interposer.dll
-    sl.common.dll
-    sl.dlss.dll
-    sl.dlss_g.dll
-    sl.pcl.dll
-    sl.reflex.dll
-    nvngx_dlss.dll
-    nvngx_dlssg.dll
-)
 
 fetch_streamline() {
     # Check if all DLLs already exist
@@ -46,11 +73,8 @@ fetch_streamline() {
         return
     fi
 
-    local zip="$TEMP_DIR/streamline-sdk-${STREAMLINE_VERSION}.zip"
-    if [ ! -f "$zip" ]; then
-        echo "  Downloading Streamline SDK ${STREAMLINE_VERSION}..."
-        curl -fSL "$STREAMLINE_URL" -o "$zip" || { echo "ERROR: Failed to download $STREAMLINE_URL"; exit 1; }
-    fi
+    local zip="$TEMP_DIR/$STREAMLINE_ARCHIVE"
+    fetch_archive "Streamline SDK ${STREAMLINE_VERSION}" "$STREAMLINE_URL" "$STREAMLINE_SHA256" "$zip"
 
     mkdir -p "$STREAMLINE_DEST"
     for dll in "${STREAMLINE_DLLS[@]}"; do
@@ -65,21 +89,29 @@ fetch_streamline() {
 FIDELITYFX_DEST="$PACKAGE_DIR/F4SE/Plugins/FrameGeneration/FidelityFX"
 
 fetch_fidelityfx() {
-    if [ -f "$FIDELITYFX_DEST/amd_fidelityfx_dx12.dll" ] && [ "$1" != "--force" ]; then
-        echo "  FidelityFX DLL already present, skipping (use --force to re-download)"
+    local missing=false
+    for dll in "${FIDELITYFX_DLLS[@]}"; do
+        if [ ! -f "$FIDELITYFX_DEST/$dll" ]; then
+            missing=true
+            break
+        fi
+    done
+
+    if [ "$missing" = false ] && [ "$1" != "--force" ]; then
+        echo "  FidelityFX DLLs already present, skipping (use --force to re-download)"
         return
     fi
 
-    local zip="$TEMP_DIR/FidelityFX-SDK-${FIDELITYFX_VERSION}.zip"
-    if [ ! -f "$zip" ]; then
-        echo "  Downloading FidelityFX SDK ${FIDELITYFX_VERSION}..."
-        curl -fSL "$FIDELITYFX_URL" -o "$zip" || { echo "ERROR: Failed to download $FIDELITYFX_URL"; exit 1; }
-    fi
+    local zip="$TEMP_DIR/$FIDELITYFX_ARCHIVE"
+    fetch_archive "FidelityFX SDK ${FIDELITYFX_VERSION}" "$FIDELITYFX_URL" "$FIDELITYFX_SHA256" "$zip"
 
     mkdir -p "$FIDELITYFX_DEST"
-    unzip -jo "$zip" "PrebuiltSignedDLL/amd_fidelityfx_dx12.dll" -d "$FIDELITYFX_DEST" 2>/dev/null
+    for dll in "${FIDELITYFX_DLLS[@]}"; do
+        unzip -jo "$zip" "PrebuiltSignedDLL/$dll" -d "$FIDELITYFX_DEST" 2>/dev/null || \
+            echo "  WARNING: $dll not found in archive"
+    done
     [[ -f "$FIDELITYFX_DEST/amd_fidelityfx_dx12.dll" ]] || { echo "ERROR: amd_fidelityfx_dx12.dll not found after extraction"; exit 1; }
-    echo "  FidelityFX ${FIDELITYFX_VERSION}: amd_fidelityfx_dx12.dll extracted"
+    echo "  FidelityFX ${FIDELITYFX_VERSION}: ${#FIDELITYFX_DLLS[@]} DLLs extracted"
 }
 
 # ─── XeSS (Intel XeSS-FG) ───────────────────────────────────────────────────
@@ -98,9 +130,10 @@ fetch_xess() {
     fi
 
     mkdir -p "$XESS_DEST"
-    cp "$XESS_SRC/libxess_fg.dll" "$XESS_DEST/" || { echo "ERROR: Failed to copy libxess_fg.dll"; exit 1; }
-    cp "$XESS_SRC/libxell.dll" "$XESS_DEST/" || { echo "ERROR: Failed to copy libxell.dll"; exit 1; }
-    echo "  XeSS: libxess_fg.dll + libxell.dll copied from submodule"
+    for dll in "${XESS_DLLS[@]}"; do
+        cp "$XESS_SRC/$dll" "$XESS_DEST/" || { echo "ERROR: Failed to copy $dll"; exit 1; }
+    done
+    echo "  XeSS: ${#XESS_DLLS[@]} DLLs copied from submodule"
 }
 
 # ─── Main ────────────────────────────────────────────────────────────────────

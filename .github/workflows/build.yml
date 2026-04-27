@@ -46,23 +46,37 @@ jobs:
       - name: Package mod
         shell: bash
         run: |
+          PKG="package"
+          BLD="build/plugins"
+
           mkdir -p staging/F4SE/Plugins
-          # Built DLLs
-          cp build/plugins/FrameGeneration/Release/AAAFrameGeneration.dll staging/F4SE/Plugins/
-          cp build/plugins/Upscaling/Release/Upscaling.dll staging/F4SE/Plugins/
-          cp build/plugins/MotionVectorFixes/Release/MotionVectorFixes.dll staging/F4SE/Plugins/
-          # Package assets (shaders, DLLs, configs)
-          cp -r package/F4SE/Plugins/* staging/F4SE/Plugins/
-          # FrameGeneration needs its own Streamline copy
+          mkdir -p staging/F4SE/Plugins/Upscaling
+          mkdir -p staging/F4SE/Plugins/FrameGeneration/FidelityFX
+          mkdir -p staging/F4SE/Plugins/FrameGeneration/XeSS
           mkdir -p staging/F4SE/Plugins/FrameGeneration/Streamline
+          mkdir -p staging/F4SE/Plugins/Streamline
+          # Built DLLs
+          cp "$BLD/FrameGeneration/Release/AAAFrameGeneration.dll" staging/F4SE/Plugins/
+          cp "$BLD/Upscaling/Release/Upscaling.dll" staging/F4SE/Plugins/
+          cp "$BLD/MotionVectorFixes/Release/MotionVectorFixes.dll" staging/F4SE/Plugins/
+          # Tracked shader assets
+          cp "$PKG/F4SE/Plugins/Upscaling/"*.hlsl staging/F4SE/Plugins/Upscaling/
+          cp "$PKG/F4SE/Plugins/FrameGeneration/"*.hlsl staging/F4SE/Plugins/FrameGeneration/
+          # Fetched SDK runtime DLLs
+          cp "$PKG/F4SE/Plugins/FrameGeneration/FidelityFX/amd_fidelityfx_dx12.dll" staging/F4SE/Plugins/FrameGeneration/FidelityFX/
+          for dll in libxess_fg.dll libxell.dll; do
+            cp "$PKG/F4SE/Plugins/FrameGeneration/XeSS/$dll" staging/F4SE/Plugins/FrameGeneration/XeSS/
+          done
+          cp "$PKG/F4SE/Plugins/Streamline/"*.dll staging/F4SE/Plugins/Streamline/
+          # FrameGeneration needs its own Streamline copy
           for dll in sl.interposer.dll sl.common.dll sl.dlss_g.dll nvngx_dlssg.dll sl.pcl.dll sl.reflex.dll; do
-            [ -f "package/F4SE/Plugins/Streamline/$dll" ] && cp "package/F4SE/Plugins/Streamline/$dll" staging/F4SE/Plugins/FrameGeneration/Streamline/
+            cp "$PKG/F4SE/Plugins/Streamline/$dll" staging/F4SE/Plugins/FrameGeneration/Streamline/
           done
           # MCM config
-          cp -r package/MCM staging/
+          cp -r "$PKG/MCM" staging/
           # Game asset overrides
-          [ -d package/Meshes ] && cp -r package/Meshes staging/
-          [ -d package/Textures ] && cp -r package/Textures staging/
+          [ -d "$PKG/Meshes" ] && cp -r "$PKG/Meshes" staging/
+          [ -d "$PKG/Textures" ] && cp -r "$PKG/Textures" staging/
 
       - name: Upload mod package
         uses: actions/upload-artifact@v4

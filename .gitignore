@@ -11,3 +11,4 @@ scripts/references/*.png
 package/F4SE/Plugins/Streamline/*.dll
 package/F4SE/Plugins/FrameGeneration/FidelityFX/*.dll
 package/F4SE/Plugins/FrameGeneration/XeSS/*.dll
+package/F4SE/Plugins/**/*.pdb

@@ -59,7 +59,7 @@ Output:
 
 ## SDK Runtime DLLs
 
-Third-party runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS) are not stored in git. Run `scripts/fetch-sdks.sh` after cloning to download them from official GitHub releases:
+Third-party runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS) are not stored in git. Run `scripts/fetch-sdks.sh` after cloning to download them from official GitHub releases. Downloaded archives are verified against the SHA-256 hashes in `scripts/sdk-manifest.sh`.
 
 | SDK | Version | DLLs | Source |
 |-----|---------|------|--------|
@@ -67,7 +67,7 @@ Third-party runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS) are not
 | AMD FidelityFX | v1.1.4 | amd_fidelityfx_dx12.dll | [GitHub release](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/v1.1.4) |
 | Intel XeSS | submodule | libxess_fg.dll, libxell.dll | Copied from `extern/XeSS/bin/` |
 
-The deploy script auto-fetches if DLLs are missing. Downloaded archives are cached in `.sdk-cache/`.
+The deploy script auto-fetches if DLLs are missing. Downloaded archives are cached in `.sdk-cache/`. The tracked `package/` tree contains mod assets (shaders, MCM config, mesh/texture overrides, and license files); SDK runtime DLLs are generated/staged files and are ignored by git.
 
 ## Scripts
 
@@ -125,9 +125,10 @@ Each release produces 3 separate distributable zips, one per plugin:
 
 | Package | Contents |
 |---------|----------|
-| `MotionVectorFixes-vX.X.X.zip` | DLL + PDB |
-| `Upscaling-vX.X.X.zip` | DLL + PDB + shaders + Streamline DLLs + MCM config + mesh overrides |
-| `FrameGeneration-vX.X.X.zip` | DLL + PDB + shaders + Streamline + FidelityFX + XeSS DLLs + MCM config |
+| `MotionVectorFixes-vX.X.X.zip` | DLL |
+| `Upscaling-vX.X.X.zip` | DLL + shaders + Streamline DLLs + MCM config + mesh overrides |
+| `FrameGeneration-vX.X.X.zip` | DLL + shaders + Streamline + FidelityFX + XeSS DLLs + MCM config |
+| `FO4Upscaling-Symbols-vX.X.X.zip` | Debug symbols for this project's DLLs only |
 
 Each zip has the correct folder structure for MO2 — extract into your mod folder.
 
